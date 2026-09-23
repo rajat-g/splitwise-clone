@@ -54,9 +54,8 @@ export default function Layout({ children }) {
               </Link>
             )}
             <Link to="/" className="flex min-w-0 items-center gap-2.5" aria-label="FairSplit home">
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-teal-600 to-emerald-500 text-white shadow-[0_2px_8px_-2px_rgb(13_148_136/0.6)]">
-                <Icon.Split className="h-5 w-5" />
-              </span>
+              <img src="/icons/icon.svg" alt="" aria-hidden="true"
+                className="h-9 w-9 shrink-0 rounded-[10px] shadow-[0_2px_8px_-2px_rgb(13_148_136/0.6)]" />
               <span className="min-w-0">
                 <span className="block truncate text-[17px] font-extrabold leading-none tracking-tight text-slate-900 dark:text-white">
                   FairSplit

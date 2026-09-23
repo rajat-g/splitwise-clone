@@ -121,6 +121,14 @@ Group `publicId` (21-char secret) is the URL. `inviteCode` (10-char,
 brute-force resistant) resolves via indexed lookup and can be rotated
 by anyone holding the link. No enumeration endpoint.
 
+## PWA (installable app)
+
+FairSplit is installable (Add to Home Screen) with offline app-shell caching:
+
+- `public/manifest.webmanifest` — name, icons (192/512 + maskable), standalone display
+- Service worker via `vite-plugin-pwa` (`registerType: autoUpdate`): precaches the built shell, resolves SPA deep links (`/g/:id`) offline via `index.html` fallback. Convex API traffic is never cached — realtime data still flows through the app's own offline queue + snapshots.
+- Brand icon masters live in `public/icons/` (`icon.svg`, `maskable-icon.svg`). Regenerate all rasters + favicon after editing: `npm run icons`.
+
 ## Testing
 
 ```bash

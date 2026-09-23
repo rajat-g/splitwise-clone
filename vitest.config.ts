@@ -1,6 +1,13 @@
+import path from "node:path";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      // vite-plugin-pwa is a build-time plugin; stub its virtual module in tests.
+      "virtual:pwa-register": path.resolve(import.meta.dirname, "vitest.pwa-stub.js"),
+    },
+  },
   test: {
     projects: [
       {

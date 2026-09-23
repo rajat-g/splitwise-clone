@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
+    "icons": "node scripts/generate-icons.mjs",
     "preview": "vite preview",
     "setup:auth": "node scripts/setup-auth.mjs"
   },
@@ -36,9 +37,11 @@
     "convex-test": "^0.0.59",
     "jsdom": "^30.1.1",
     "oxlint": "^1.81.0",
+    "sharp": "^0.35.4",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vite": "^8.3.0",
+    "vite-plugin-pwa": "^1.3.0",
     "vitest": "^5.0.1"
   }
 }
