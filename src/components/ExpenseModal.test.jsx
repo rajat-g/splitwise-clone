@@ -1,0 +1,108 @@
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import ExpenseModal from "./ExpenseModal";
+
+const members = [
+  { _id: "m1", name: "Ann", email: "a@x.co" },
+  { _id: "m2", name: "Bo", email: "b@x.co" },
+];
+
+function fillValid() {
+  fireEvent.change(screen.getByPlaceholderText(/dinner/i), { target: { value: "Dinner" } });
+  fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "100" } });
+}
+
+describe("ExpenseModal", () => {
+  it("validates description and amount before saving", () => {
+    const onSave = vi.fn();
+    render(<ExpenseModal members={members} currency="$" onClose={() => {}} onSave={onSave} />);
+    fireEvent.click(screen.getByRole("button", { name: /add expense/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/description/i);
+    expect(onSave).not.toHaveBeenCalled();
+
+    fillValid();
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: /add expense/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/greater than 0/i);
+  });
+
+  it("saves an equal split with category and split mode", () => {
+    const onSave = vi.fn();
+    render(<ExpenseModal members={members} currency="$" onClose={() => {}} onSave={onSave} />);
+    fillValid();
+    fireEvent.change(screen.getByLabelText("Category"), { target: { value: "food" } });
+    fireEvent.click(screen.getByRole("button", { name: /add expense/i }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      description: "Dinner",
+      amount: 100,
+      paidBy: "m1",
+      category: "food",
+      splitMode: "equal",
+    }));
+    expect(onSave.mock.calls[0][0].splits).toMatchObject({ m1: 50, m2: 50 });
+  });
+
+  it("requires exact splits to sum to the total", () => {
+    const onSave = vi.fn();
+    render(<ExpenseModal members={members} currency="$" onClose={() => {}} onSave={onSave} />);
+    fillValid();
+    fireEvent.click(screen.getByRole("button", { name: "Exact" }));
+    fireEvent.change(screen.getByLabelText("Ann (a@x.co) amount"), { target: { value: "60" } });
+    fireEvent.click(screen.getByLabelText("Ann (a@x.co) amount"));
+    fireEvent.change(screen.getByLabelText("Bo (b@x.co) amount"), { target: { value: "30" } });
+    fireEvent.click(screen.getByRole("button", { name: /add expense/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/must equal/);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("validates percent and shares modes", () => {
+    const onSave = vi.fn();
+    render(<ExpenseModal members={members} currency="$" onClose={() => {}} onSave={onSave} />);
+    fillValid();
+    fireEvent.click(screen.getByRole("button", { name: "%" }));
+    fireEvent.click(screen.getByRole("button", { name: /add expense/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/100%/);
+    fireEvent.click(screen.getByRole("button", { name: "Shares" }));
+    fireEvent.click(screen.getByRole("button", { name: /add expense/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/share/i);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("toggles members out of the split and cancels", () => {
+    const onClose = vi.fn();
+    const onSave = vi.fn();
+    render(<ExpenseModal members={members} currency="$" onClose={onClose} onSave={onSave} />);
+    fillValid();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Bo/ }));
+    fireEvent.click(screen.getByRole("button", { name: /add expense/i }));
+    expect(onSave.mock.calls[0][0].splits).toMatchObject({ m1: 100 });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("edits with initial values and a saving state", () => {
+    render(
+      <ExpenseModal
+        members={members} currency="$" saving
+        initial={{ description: "Old", amount: 40, paidBy: "m2", date: "2026-09-01", splits: { m1: 20, m2: 20 } }}
+        onClose={() => {}} onSave={() => {}}
+      />
+    );
+    expect(screen.getByDisplayValue("Old")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /saving/i })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Paid by"), { target: { value: "m1" } });
+    fireEvent.change(screen.getByLabelText("Date"), { target: { value: "2026-09-05" } });
+    expect(screen.getByDisplayValue("2026-09-05")).toBeInTheDocument();
+  });
+
+  it("requires a payer", () => {
+    const onSave = vi.fn();
+    render(
+      <ExpenseModal members={[]} currency="$" onClose={() => {}} onSave={onSave}
+        initial={{ description: "Dinner", amount: 10, paidBy: "", date: "2026-09-20", splits: { m9: 10 } }} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/who paid/i);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+});

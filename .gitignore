@@ -25,3 +25,6 @@ dist-ssr
 
 # Agent session artifacts
 .impeccable/
+
+# Test coverage output
+coverage/

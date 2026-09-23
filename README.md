@@ -121,6 +121,18 @@ Group `publicId` (21-char secret) is the URL. `inviteCode` (10-char,
 brute-force resistant) resolves via indexed lookup and can be rotated
 by anyone holding the link. No enumeration endpoint.
 
+## Testing
+
+```bash
+npm test           # all tests (backend + UI)
+npm run test:watch # watch mode
+npm run coverage   # with coverage report (thresholds: 90% lines/functions/statements, 85% branches)
+```
+
+- Backend (`convex/*.test.ts`): real function executions via `convex-test` (edge runtime), including auth flows with seeded users.
+- Frontend (`src/**/*.test.{js,jsx}`): jsdom + Testing Library with mocked Convex hooks.
+- 246 tests covering splits math, debt simplification, offline queue/sync, members, expenses, groups, auth, categories, and every page/component.
+
 ## Troubleshooting
 
 - `Connect Convex to go live` screen → `VITE_CONVEX_URL` missing in `.env`; run `npx convex dev` and copy the URL.

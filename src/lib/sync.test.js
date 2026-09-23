@@ -1,0 +1,94 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { syncOutbox } from "./sync";
+import { dropOp, enqueueAdd, enqueueRemove, enqueueUpdate, getOutbox } from "./offline";
+
+const G = "group-9";
+const entry = {
+  description: "Dinner",
+  amountCents: 1000,
+  paidBy: "m1",
+  splits: [{ memberId: "m1", amountCents: 1000 }],
+  date: "2026-09-20",
+  isSettlement: false,
+};
+
+function reset() {
+  localStorage.clear();
+  for (const op of getOutbox()) dropOp(op.opId);
+}
+
+beforeEach(reset);
+
+function client(impl = {}) {
+  return {
+    mutation: vi.fn(async (fn, args) => {
+      void fn;
+      if (args.expenseId === "missing") throw new Error("Expense not found.");
+      return { _id: "real-1" };
+    }),
+    ...impl,
+  };
+}
+
+describe("syncOutbox", () => {
+  it("replays adds and drops them on success", async () => {
+    enqueueAdd(G, entry);
+    const c = client();
+    const res = await syncOutbox(c, G);
+    expect(res).toEqual({ synced: 1, total: 1 });
+    expect(c.mutation).toHaveBeenCalledTimes(1);
+    expect(getOutbox()).toHaveLength(0);
+  });
+
+  it("passes category/splitMode defaults for legacy queued entries", async () => {
+    enqueueAdd(G, entry);
+    const c = client();
+    await syncOutbox(c, G);
+    expect(c.mutation.mock.calls[0][1]).toMatchObject({ category: "other", splitMode: "equal" });
+  });
+
+  it("merges an update queued behind its own add into one synced op", async () => {
+    const tempId = enqueueAdd(G, entry);
+    enqueueUpdate(G, tempId, { ...entry, description: "Edited" });
+    const c = client();
+    const res = await syncOutbox(c, G);
+    expect(res).toEqual({ synced: 1, total: 1 });
+    expect(c.mutation.mock.calls[0][1].description).toBe("Edited");
+    expect(getOutbox()).toHaveLength(0);
+  });
+
+  it("marks failing ops as failed with a trimmed message", async () => {
+    enqueueUpdate(G, "missing", entry);
+    const res = await syncOutbox(client(), G);
+    expect(res).toEqual({ synced: 0, total: 1 });
+    const [op] = getOutbox();
+    expect(op.status).toBe("failed");
+    expect(op.error).toBe("Expense not found.");
+  });
+
+  it("holds a remove that points at an unknown temp id for retry", async () => {
+    enqueueAdd(G, entry);
+    enqueueRemove(G, "tmp-orphan");
+    const res = await syncOutbox(client(), G);
+    expect(res).toEqual({ synced: 1, total: 2 });
+    const [leftover] = getOutbox();
+    expect(leftover.kind).toBe("remove");
+    expect(leftover.status).toBe("failed");
+    expect(leftover.error).toMatch(/waiting on its queued add/);
+  });
+
+  it("does nothing when the queue is empty", async () => {
+    const c = client();
+    expect(await syncOutbox(c, G)).toEqual({ synced: 0, total: 0 });
+    expect(c.mutation).not.toHaveBeenCalled();
+  });
+
+  it("replays updates and removes", async () => {
+    enqueueUpdate(G, "e1", { ...entry, description: "Edited" });
+    enqueueRemove(G, "e2");
+    const c = client();
+    const res = await syncOutbox(c, G);
+    expect(res).toEqual({ synced: 2, total: 2 });
+    expect(getOutbox()).toHaveLength(0);
+  });
+});

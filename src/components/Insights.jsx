@@ -10,7 +10,7 @@ import { Card, EmptyState, Icon, Progress, SectionTitle, Stat } from "./ui";
 const mid = (m) => String(m._id ?? m.id);
 
 // Compact axis amounts: $1.2k instead of $1200.00.
-function shortMoney(v, currency) {
+export function shortMoney(v, currency) {
   const n = Number(v) || 0;
   if (Math.abs(n) >= 1000) {
     const k = n / 1000;
@@ -25,8 +25,14 @@ function monthLabel(key) {
   return new Date(y, m - 1, 1).toLocaleString(undefined, { month: "short", year: "2-digit" });
 }
 
+// Keep long member names inside the chart axis.
+export function truncateName(n) {
+  const s = String(n);
+  return s.length > 12 ? `${s.slice(0, 11)}…` : s;
+}
+
 // Dark-mode aware tooltip: plain div, styled with Tailwind.
-function ChartTip({ active, payload, label, currency }) {
+export function ChartTip({ active, payload, label, currency }) {
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-[var(--shadow-pop)] dark:border-white/10 dark:bg-[#0e1621]">
@@ -231,7 +237,7 @@ export default function Insights({ expenses, members, currency, displayOf }) {
                   <XAxis type="number" tick={tickProps} axisLine={false} tickLine={false}
                     tickFormatter={(v) => shortMoney(v, currency)} />
                   <YAxis type="category" dataKey="name" tick={tickProps} axisLine={false} tickLine={false} width={96}
-                    tickFormatter={(n) => (String(n).length > 12 ? `${String(n).slice(0, 11)}…` : String(n))} />
+                    tickFormatter={(n) => truncateName(n)} />
                   <Tooltip content={<ChartTip currency={currency} />} cursor={{ fill: "currentColor", opacity: 0.08 }} />
                   <Bar dataKey="paid" name="Paid" fill="#10b981" radius={[2, 8, 8, 2]} maxBarSize={16} />
                   <Bar dataKey="share" name="Share" fill="#f59e0b" radius={[2, 8, 8, 2]} maxBarSize={16} />

@@ -1,0 +1,91 @@
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { OutboxBar } from "./OutboxBar";
+
+const addOp = (over = {}) => ({
+  opId: "op-1", groupPublicId: "g", kind: "add", tempId: "tmp-1",
+  entry: { description: "Dinner", isSettlement: false },
+  status: "pending", error: "", ...over,
+});
+
+describe("OutboxBar", () => {
+  it("renders nothing without items", () => {
+    const { container } = render(
+      <OutboxBar items={[]} online syncing={false} onSync={() => {}} onRetry={() => {}} onDiscard={() => {}} />
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("shows pending count and syncs", () => {
+    const onSync = vi.fn();
+    render(
+      <OutboxBar items={[addOp(), addOp({ opId: "op-2" })]} online={false} syncing={false}
+        onSync={onSync} onRetry={() => {}} onDiscard={() => {}} />
+    );
+    expect(screen.getByText(/2 changes/)).toBeInTheDocument();
+    expect(screen.getByText(/you're offline/)).toBeInTheDocument();
+    const btn = screen.getByRole("button", { name: /offline/i });
+    expect(btn).toBeDisabled();
+    fireEvent.click(btn);
+    expect(onSync).not.toHaveBeenCalled();
+  });
+
+  it("shows syncing state when online", () => {
+    const onSync = vi.fn();
+    render(
+      <OutboxBar items={[addOp()]} online syncing onSync={onSync} onRetry={() => {}} onDiscard={() => {}} />
+    );
+    expect(screen.getByText(/waiting to sync/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Syncing…" })).toBeDisabled();
+  });
+
+  it("lists failed ops with retry and discard", () => {
+    const onRetry = vi.fn();
+    const onDiscard = vi.fn();
+    render(
+      <OutboxBar
+        items={[
+          addOp({ opId: "f1", status: "failed", error: "boom" }),
+          { opId: "f2", groupPublicId: "g", kind: "update", status: "failed", error: "" },
+          { opId: "f3", groupPublicId: "g", kind: "remove", status: "failed", error: "" },
+          { opId: "f4", groupPublicId: "g", kind: "add", entry: { description: "P", isSettlement: true }, status: "failed", error: "" },
+        ]}
+        online syncing={false} onSync={() => {}} onRetry={onRetry} onDiscard={onDiscard}
+      />
+    );
+    expect(screen.getByText(/couldn't sync/)).toBeInTheDocument();
+    expect(screen.getByText(/Edit queued/)).toBeInTheDocument();
+    expect(screen.getByText(/Delete queued/)).toBeInTheDocument();
+    expect(screen.getByText(/Payment queued: P/)).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "Retry" })[0]);
+    expect(onRetry).toHaveBeenCalledWith("f1");
+    fireEvent.click(screen.getAllByRole("button", { name: "Discard" })[0]);
+    expect(onDiscard).toHaveBeenCalledWith("f1");
+  });
+
+  it("syncs pending ops when online", () => {
+    const onSync = vi.fn();
+    render(
+      <OutboxBar items={[addOp()]} online syncing={false}
+        onSync={onSync} onRetry={() => {}} onDiscard={() => {}} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /sync now/i }));
+    expect(onSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables retry while offline", () => {
+    render(
+      <OutboxBar items={[addOp({ status: "failed", error: "x" })]} online={false} syncing={false}
+        onSync={() => {}} onRetry={() => {}} onDiscard={() => {}} />
+    );
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDisabled();
+  });
+
+  it("labels entries without a description", () => {
+    render(
+      <OutboxBar items={[{ opId: "e1", groupPublicId: "g", kind: "add", status: "failed", error: "" }]}
+        online syncing={false} onSync={() => {}} onRetry={() => {}} onDiscard={() => {}} />
+    );
+    expect(screen.getByText(/expense queued: expense/i)).toBeInTheDocument();
+  });
+});
