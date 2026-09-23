@@ -66,16 +66,16 @@ console.log(`Convex Auth setup -> ${PROD ? "PROD" : "dev"} deployment\n`);
 
 if (DRY_RUN) {
   console.log("[dry-run] would run:");
-  console.log(`  npx convex env set JWT_PRIVATE_KEY ${mask(privateKey)} ${SCOPE.join(" ")}`.trimEnd());
-  console.log(`  npx convex env set JWKS ${mask(jwks)} ${SCOPE.join(" ")}`.trimEnd());
+  console.log(`  npx convex env set ${SCOPE.join(" ")} JWT_PRIVATE_KEY ${mask(privateKey)}`.replace(/  +/g, " ").trimEnd());
+  console.log(`  npx convex env set ${SCOPE.join(" ")} JWKS ${mask(jwks)}`.replace(/  +/g, " ").trimEnd());
   console.log("\n[dry-run] nothing changed.");
   process.exit(0);
 }
 
 for (const [name, value] of [["JWT_PRIVATE_KEY", privateKey], ["JWKS", jwks]]) {
-  // "--" ends option parsing: values starting with "-" (like the
-  // "-----BEGIN ..." key) must not be mistaken for CLI flags.
-  const res = runConvex(["env", "set", "--", name, value, ...SCOPE]);
+  // Scope flags (--prod) must precede "--": everything after "--" is
+  // positional, so a trailing --prod would be miscounted as a third value.
+  const res = runConvex(["env", "set", ...SCOPE, "--", name, value]);
   if (res.status !== 0) {
     console.error(
       `\nFailed to set ${name} (exit ${res.status}). ` +
