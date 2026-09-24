@@ -88,4 +88,30 @@ describe("OutboxBar", () => {
     );
     expect(screen.getByText(/expense queued: expense/i)).toBeInTheDocument();
   });
+
+  it("holds other accounts' ops untouched without actions", () => {
+    const onSync = vi.fn();
+    const onRetry = vi.fn();
+    const onDiscard = vi.fn();
+    render(
+      <OutboxBar items={[addOp({ opId: "f", userId: "u2" })]} userId="u1"
+        online syncing={false} onSync={onSync} onRetry={onRetry} onDiscard={onDiscard} />
+    );
+    expect(screen.getByText(/belong to another account/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /sync now/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Discard" })).not.toBeInTheDocument();
+  });
+
+  it("mixes my pending ops with a foreign notice", () => {
+    const onSync = vi.fn();
+    render(
+      <OutboxBar items={[addOp(), addOp({ opId: "f", userId: "u2" })]} userId="u1"
+        online syncing={false} onSync={onSync} onRetry={() => {}} onDiscard={() => {}} />
+    );
+    expect(screen.getByText(/waiting to sync/)).toBeInTheDocument();
+    expect(screen.getByText(/different signed-in account/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /sync now/i }));
+    expect(onSync).toHaveBeenCalledTimes(1);
+  });
 });

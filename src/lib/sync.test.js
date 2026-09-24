@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { syncOutbox } from "./sync";
+import { syncAllUserOps, syncOutbox } from "./sync";
 import { dropOp, enqueueAdd, enqueueRemove, enqueueUpdate, getOutbox } from "./offline";
 
 const G = "group-9";
@@ -90,5 +90,30 @@ describe("syncOutbox", () => {
     const res = await syncOutbox(c, G);
     expect(res).toEqual({ synced: 2, total: 2 });
     expect(getOutbox()).toHaveLength(0);
+  });
+
+  it("never replays another account's ops", async () => {
+    enqueueAdd(G, entry, "u1");
+    enqueueAdd(G, entry, "u2");
+    const c = client();
+    const res = await syncOutbox(c, G, { userId: "u1" });
+    expect(res).toEqual({ synced: 1, total: 1 });
+    expect(c.mutation).toHaveBeenCalledTimes(1);
+    expect(getOutbox()).toHaveLength(1);
+    // The other session picks up exactly its own op later.
+    const res2 = await syncOutbox(c, G, { userId: "u2" });
+    expect(res2).toEqual({ synced: 1, total: 1 });
+    expect(getOutbox()).toHaveLength(0);
+  });
+
+  it("flushes one account across groups", async () => {
+    enqueueAdd(G, entry, "u1");
+    enqueueAdd("other-group", entry, "u1");
+    enqueueAdd(G, entry, "u2");
+    const c = client();
+    const res = await syncAllUserOps(c, "u1");
+    expect(res).toEqual({ synced: 2, total: 2 });
+    expect(c.mutation).toHaveBeenCalledTimes(2);
+    expect(getOutbox()).toHaveLength(1);
   });
 });

@@ -80,16 +80,38 @@ export function filterGroupOps(list, publicId, { includeFailed = true } = {}) {
   );
 }
 
-export function pendingCountForGroup(publicId) {
-  return countPendingOps(outbox, publicId);
+export function pendingCountForGroup(publicId, userId) {
+  return countPendingOps(outbox, publicId, userId);
 }
 
 /** List-based variant for React memos (takes the useOutbox() value). */
-export function countPendingOps(list, publicId) {
-  return (list || []).filter((o) => o.groupPublicId === publicId && o.status === "pending").length;
+export function countPendingOps(list, publicId, userId) {
+  return (list || []).filter(
+    (o) => o.groupPublicId === publicId && o.status === "pending" && opBelongsTo(o, userId)
+  ).length;
 }
 
-export function enqueueAdd(publicId, entry) {
+/**
+ * Identity boundary for the shared-device outbox. Every op is stamped with
+ * the owning account id at enqueue time; the stamp is routing-only (which
+ * session may replay it) and is never trusted server-side — attribution and
+ * membership always derive from the live auth session. Unstamped ops predate
+ * stamping and stay replayable by anyone (legacy fallback).
+ */
+export function opBelongsTo(op, userId) {
+  if (!op || !op.userId) return true;
+  if (!userId) return false;
+  return String(op.userId) === String(userId);
+}
+
+/** Pending ops in a group that belong to the given session (for auto-sync). */
+export function myPendingOps(list, publicId, userId) {
+  return (list || []).filter(
+    (o) => o.groupPublicId === publicId && o.status === "pending" && opBelongsTo(o, userId)
+  );
+}
+
+export function enqueueAdd(publicId, entry, userId = null) {
   const op = {
     opId: newOpId(),
     groupPublicId: publicId,
@@ -97,6 +119,7 @@ export function enqueueAdd(publicId, entry) {
     tempId: newTempId(),
     clientId: newOpId(),
     entry,
+    userId: userId ?? null,
     createdAt: Date.now(),
     status: "pending",
     error: "",
@@ -106,7 +129,7 @@ export function enqueueAdd(publicId, entry) {
   return op.tempId;
 }
 
-export function enqueueUpdate(publicId, expenseId, patch) {
+export function enqueueUpdate(publicId, expenseId, patch, userId = null) {
   const id = String(expenseId);
   const { isSettlement, ...rest } = patch;
   void isSettlement;
@@ -140,6 +163,7 @@ export function enqueueUpdate(publicId, expenseId, patch) {
       kind: "update",
       expenseId: id,
       patch: rest,
+      userId: userId ?? null,
       createdAt: Date.now(),
       status: "pending",
       error: "",
@@ -149,7 +173,7 @@ export function enqueueUpdate(publicId, expenseId, patch) {
   return id;
 }
 
-export function enqueueRemove(publicId, expenseId) {
+export function enqueueRemove(publicId, expenseId, userId = null) {
   const id = String(expenseId);
   const addIdx = outbox.findIndex(
     (o) => o.groupPublicId === publicId && o.kind === "add" && o.tempId === id && o.status !== "syncing"
@@ -179,6 +203,7 @@ export function enqueueRemove(publicId, expenseId) {
         groupPublicId: publicId,
         kind: "remove",
         expenseId: id,
+        userId: userId ?? null,
         createdAt: Date.now(),
         status: "pending",
         error: "",

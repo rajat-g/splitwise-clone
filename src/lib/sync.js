@@ -3,15 +3,18 @@
 // expense instead of inserting a duplicate.
 
 import { api } from "../../convex/_generated/api";
-import { dropOp, markOp, opsForGroup } from "./offline";
+import { dropOp, getOutbox, markOp, opBelongsTo, opsForGroup } from "./offline";
 
 function friendly(e) {
   const m = String(e?.message || e?.data || e || "Sync failed");
   return m.replace(/^Uncaught Error:\s*/, "").slice(0, 200);
 }
 
-export async function syncOutbox(client, publicId, { includeFailed = false } = {}) {
-  const ops = opsForGroup(publicId, { includeFailed }).filter((o) => o.status !== "syncing");
+export async function syncOutbox(client, publicId, { includeFailed = false, userId } = {}) {
+  // Identity boundary: only replay ops stamped for this session. Anything
+  // else stays queued for its owner — never replayed under another account.
+  const ops = opsForGroup(publicId, { includeFailed })
+    .filter((o) => o.status !== "syncing" && opBelongsTo(o, userId));
   const tempToReal = new Map();
   let synced = 0;
   for (const op of ops) {
@@ -64,4 +67,26 @@ export async function syncOutbox(client, publicId, { includeFailed = false } = {
     }
   }
   return { synced, total: ops.length };
+}
+
+/**
+ * Flush every pending op owned by this session, across groups — used by the
+ * sign-out flow so an account never leaves unsynced writes behind silently.
+ */
+export async function syncAllUserOps(client, userId) {
+  const groups = [
+    ...new Set(
+      getOutbox()
+        .filter((o) => o.status === "pending" && opBelongsTo(o, userId))
+        .map((o) => o.groupPublicId)
+    ),
+  ];
+  let synced = 0;
+  let total = 0;
+  for (const groupPublicId of groups) {
+    const r = await syncOutbox(client, groupPublicId, { userId });
+    synced += r.synced;
+    total += r.total;
+  }
+  return { synced, total };
 }

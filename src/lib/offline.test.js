@@ -12,8 +12,10 @@ import {
   isTempId,
   loadSnapshot,
   markOp,
+  myPendingOps,
   newOpId,
   newTempId,
+  opBelongsTo,
   opsForGroup,
   pendingCountForGroup,
   retryOp,
@@ -174,8 +176,7 @@ describe("applyOutboxToExpenses", () => {
   });
 });
 
-describe("snapshots", () => {
-  it("round-trips group data and caps sizes", () => {
+describe("snapshots", () => {  it("round-trips group data and caps sizes", () => {
     const expenses = Array.from({ length: 400 }, (_, i) => ({ _id: `e${i}` }));
     const activity = Array.from({ length: 150 }, (_, i) => ({ _id: `a${i}` }));
     saveSnapshot(G, { group: { name: "Goa" }, members: [{ _id: "m1" }], expenses, activity });
@@ -189,5 +190,37 @@ describe("snapshots", () => {
     expect(loadSnapshot("nope")).toBeNull();
     localStorage.setItem("fairsplit:snap:v1:x", "{broken");
     expect(loadSnapshot("x")).toBeNull();
+  });
+});
+
+describe("identity boundary", () => {
+  it("stamps the owning account on enqueue", () => {
+    enqueueAdd(G, addEntry(), "u1");
+    enqueueUpdate(G, "e9", addEntry(), "u1");
+    enqueueRemove(G, "e8", "u1");
+    for (const op of getOutbox()) expect(op.userId).toBe("u1");
+    enqueueAdd(G, addEntry());
+    expect(getOutbox().at(-1).userId).toBeNull();
+  });
+
+  it("routes ops by stamp, keeping legacy unstamped ops replayable", () => {
+    expect(opBelongsTo({ userId: "u1" }, "u1")).toBe(true);
+    expect(opBelongsTo({ userId: "u1" }, "u2")).toBe(false);
+    expect(opBelongsTo({ userId: "u1" }, null)).toBe(false);
+    expect(opBelongsTo({}, "u1")).toBe(true);
+    expect(opBelongsTo({}, null)).toBe(true);
+    expect(opBelongsTo(null, "u1")).toBe(true);
+  });
+
+  it("counts and lists only my pending ops", () => {
+    enqueueAdd(G, addEntry(), "u1");
+    enqueueAdd(G, addEntry(), "u2");
+    const ops = getOutbox();
+    expect(countPendingOps(ops, G, "u1")).toBe(1);
+    expect(countPendingOps(ops, G, "u2")).toBe(1);
+    expect(countPendingOps(ops, G, null)).toBe(0);
+    expect(myPendingOps(ops, G, "u1")).toHaveLength(1);
+    expect(pendingCountForGroup(G, "u1")).toBe(1);
+    expect(pendingCountForGroup(G)).toBe(0); // unknown session replays nothing stamped
   });
 });

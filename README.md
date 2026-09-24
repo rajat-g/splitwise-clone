@@ -66,6 +66,10 @@ Account behavior:
 
 Signed-in members can keep adding transactions with no connection. They queue on-device (localStorage) and sync automatically when back online.
 
+- Identity boundary: every queued op is stamped with its owning account and only ever replays under that same session. Another account signing in on the same device never syncs, retries, or discards your ops — the queue bar says whose they are until the owner returns.
+- Sign-out flushes your pending ops while online; offline (or after a failed flush) it warns before signing out. Queued writes survive sign-outs and sync when you sign back in.
+- Attribution and membership always derive from the live session server-side — the stamp is routing-only and never trusted.
+
 - Works offline: add expense, edit expense, delete expense, record settle-up payment. Queued rows show a **queued** badge and count toward balances immediately.
 - Viewable offline: last saved copy of a previously opened group (members, expenses, balances, activity). A group never opened on the device shows an offline notice instead.
 - Needs connection: group creation, member add/remove, invite-code rotation, sign-in itself.

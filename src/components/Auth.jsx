@@ -1,9 +1,12 @@
 import { useState } from "react";
-import { useConvexAuth, useQuery } from "convex/react";
+import { useConvex, useConvexAuth, useQuery } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { api } from "../../convex/_generated/api";
 import { Alert, Avatar, Button, Field, TextInput } from "./ui";
 import { Sheet } from "./Sheet";
+import { useOnline } from "../lib/useOnline";
+import { getOutbox, opBelongsTo, useOutbox } from "../lib/offline";
+import { syncAllUserOps } from "../lib/sync";
 
 function friendlyError(err) {
   const raw = typeof err === "string" ? err : (err?.data ?? err?.message ?? "");
@@ -112,7 +115,51 @@ export function AccountButton({ onSignIn }) {
   const { isAuthenticated, isLoading } = useConvexAuth();
   const viewer = useQuery(api.users.viewer, isAuthenticated ? {} : "skip");
   const { signOut } = useAuthActions();
+  const convexClient = useConvex();
+  const online = useOnline();
+  const outbox = useOutbox();
   const [menu, setMenu] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+
+  // Queued writes belong to the account that created them. Never let them
+  // silently ride along into another session: flush while online, warn while
+  // offline. They stay queued for this account either way.
+  const myUnsynced = (list) =>
+    (list || []).filter(
+      (o) => (o.status === "pending" || o.status === "failed") && opBelongsTo(o, viewer?._id ?? null)
+    );
+
+  const handleSignOut = async () => {
+    const count = myUnsynced(outbox).length;
+    if (count === 0) {
+      setMenu(false);
+      await signOut();
+      return;
+    }
+    if (!online) {
+      if (!confirm(
+        `You have ${count} unsynced change${count === 1 ? "" : "s"}. ` +
+        "They only sync under this account — keep this account signed in until they sync, or sign out and let them sync when you sign back in.\n\n" +
+        "Sign out anyway?"
+      )) return;
+      setMenu(false);
+      await signOut();
+      return;
+    }
+    setSigningOut(true);
+    try {
+      await syncAllUserOps(convexClient, viewer?._id ?? null);
+    } finally {
+      setSigningOut(false);
+    }
+    const left = myUnsynced(getOutbox()).length;
+    if (left > 0 && !confirm(
+      `${left} change${left === 1 ? "" : "s"} couldn't sync ` +
+      "(they stay queued for this account). Sign out anyway?"
+    )) return;
+    setMenu(false);
+    await signOut();
+  };
 
   if (isLoading) {
     return <span className="h-10 w-20 animate-pulse rounded-xl bg-slate-100 dark:bg-white/10" aria-label="Checking session" />;
@@ -144,9 +191,9 @@ export function AccountButton({ onSignIn }) {
               <span className="mt-1.5 inline-block rounded-full bg-emerald-600/10 px-2 py-0.5 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">Free account</span>
             </span>
             <span className="block border-t border-slate-100 dark:border-white/[0.07]">
-              <button onClick={() => { setMenu(false); void signOut(); }}
-                className="block w-full px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50 cursor-pointer dark:text-red-400 dark:hover:bg-red-500/10">
-                Sign out
+              <button onClick={handleSignOut} disabled={signingOut}
+                className="block w-full px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50 cursor-pointer disabled:opacity-60 dark:text-red-400 dark:hover:bg-red-500/10">
+                {signingOut ? "Syncing…" : "Sign out"}
               </button>
             </span>
           </span>

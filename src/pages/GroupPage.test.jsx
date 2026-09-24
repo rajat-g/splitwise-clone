@@ -563,6 +563,15 @@ describe("GroupPage edge paths", () => {
     await waitFor(() => expect(mutations.claimInvite).toHaveBeenCalled());
     expect(screen.getByRole("heading", { name: "Goa" })).toBeInTheDocument();
   });
+
+  it("never auto-syncs another account's queued ops", async () => {
+    mockAuthed();
+    enqueueAdd("abc", entry, "u-other");
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/belong to another account/i)).toBeInTheDocument());
+    expect(mutations.addExpense).not.toHaveBeenCalled();
+    expect(getOutbox()).toHaveLength(1);
+  });
 });
 
 describe("GroupPage expenses as a signed-in user", () => {

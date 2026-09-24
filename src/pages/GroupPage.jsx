@@ -125,7 +125,13 @@ export default function GroupPage() {
   const allOps = useOutbox();
 
   const groupOps = useMemo(() => filterGroupOps(allOps, publicId), [allOps, publicId]);
-  const pendingOnly = useMemo(() => countPendingOps(allOps, publicId), [allOps, publicId]);
+  // Only MY pending ops trigger auto-sync — another account's queued writes
+  // on this device wait for their session (identity boundary).
+  const pendingOnly = useMemo(
+    () => countPendingOps(allOps, publicId, viewer?._id ?? null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allOps, publicId, viewer?._id]
+  );
   const snapForRender = useMemo(() => (!online ? loadSnapshot(publicId) : null), [online, publicId]);
   const visibleExpenses = useMemo(
     () => applyOutboxToExpenses(expenses ?? snapForRender?.expenses ?? [], groupOps),
@@ -160,11 +166,11 @@ export default function GroupPage() {
     if (!online || !isAuthenticated || syncing) return { synced: 0, total: 0 };
     setSyncing(true);
     try {
-      return await syncOutbox(convexClient, publicId, { includeFailed });
+      return await syncOutbox(convexClient, publicId, { includeFailed, userId: viewer?._id ?? null });
     } finally {
       setSyncing(false);
     }
-  }, [online, isAuthenticated, syncing, convexClient, publicId]);
+  }, [online, isAuthenticated, syncing, convexClient, publicId, viewer?._id]);
 
   // Auto-sync queued ops whenever we're back online and signed in.
   useEffect(() => {
@@ -323,8 +329,8 @@ export default function GroupPage() {
         description: data.description, amountCents, paidBy: data.paidBy,
         splits, date: data.date, category, splitMode, isSettlement: false,
       };
-      if (editing) enqueueUpdate(publicId, String(editing._id), entry);
-      else enqueueAdd(publicId, entry);
+      if (editing) enqueueUpdate(publicId, String(editing._id), entry, viewer?._id ?? null);
+      else enqueueAdd(publicId, entry, viewer?._id ?? null);
       setShowExpense(false); setEditing(null);
       return;
     }
@@ -361,7 +367,7 @@ export default function GroupPage() {
       isSettlement: true,
     };
     if (!online) {
-      enqueueAdd(publicId, entry);
+      enqueueAdd(publicId, entry, viewer?._id ?? null);
       closeSettle();
       return;
     }
@@ -378,7 +384,7 @@ export default function GroupPage() {
     if (!requireAccount()) return;
     if (!confirm(`Delete “${e.description}”? Everyone will see it removed.`)) return;
     if (!online) {
-      enqueueRemove(publicId, String(e._id));
+      enqueueRemove(publicId, String(e._id), viewer?._id ?? null);
       return;
     }
     deleteExpense({ publicId, expenseId: e._id }).catch((err) => setError(err.message));
@@ -531,7 +537,7 @@ export default function GroupPage() {
         </div>
       )}
       <OutboxBar
-        items={groupOps} online={online} syncing={syncing}
+        items={groupOps} userId={viewer?._id ?? null} online={online} syncing={syncing}
         onSync={() => runSync({ includeFailed: true })}
         onRetry={(opId) => { retryOp(opId); runSync({ includeFailed: true }); }}
         onDiscard={(opId) => dropOp(opId)}

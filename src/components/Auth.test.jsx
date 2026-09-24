@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockUseQuery = vi.hoisted(() => vi.fn());
+const mockUseConvex = vi.hoisted(() => vi.fn());
 const mockUseConvexAuth = vi.hoisted(() => vi.fn());
 const mockSignIn = vi.hoisted(() => vi.fn());
 const mockSignOut = vi.hoisted(() => vi.fn());
@@ -8,7 +9,7 @@ const mockSignOut = vi.hoisted(() => vi.fn());
 vi.mock("convex/react", () => ({
   useQuery: (...args) => mockUseQuery(...args),
   useMutation: () => vi.fn(),
-  useConvex: () => ({}),
+  useConvex: (...args) => mockUseConvex(...args),
   useConvexAuth: (...args) => mockUseConvexAuth(...args),
   ConvexReactClient: vi.fn(),
 }));
@@ -19,13 +20,18 @@ vi.mock("@convex-dev/auth/react", () => ({
 }));
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { dropOp, enqueueAdd, getOutbox } from "../lib/offline";
 import { AccountButton, AuthDialog } from "./Auth";
 
 beforeEach(() => {
+  localStorage.clear();
+  for (const op of getOutbox()) dropOp(op.opId);
   mockUseQuery.mockReset().mockReturnValue(undefined);
+  mockUseConvex.mockReset().mockReturnValue({});
   mockUseConvexAuth.mockReset().mockReturnValue({ isAuthenticated: false, isLoading: false });
   mockSignIn.mockReset().mockResolvedValue(undefined);
   mockSignOut.mockReset().mockResolvedValue(undefined);
+  window.confirm = vi.fn(() => true);
 });
 
 function fillSignup() {
@@ -147,5 +153,81 @@ describe("AccountButton", () => {
     expect(screen.getByText("p@x.co")).toBeInTheDocument();
     fireEvent.click(container.querySelector(".fixed.inset-0.z-40"));
     expect(screen.queryByText("p@x.co")).not.toBeInTheDocument();
+  });
+
+  it("warns about unsynced changes when signing out offline", async () => {
+    Object.defineProperty(navigator, "onLine", { value: false, configurable: true });
+    mockUseConvexAuth.mockReturnValue({ isAuthenticated: true, isLoading: false });
+    mockUseQuery.mockReturnValue({ _id: "u1", name: "Priya", email: "p@x.co" });
+    enqueueAdd("g1", {
+      description: "Dinner", amountCents: 100, paidBy: "m1",
+      splits: [{ memberId: "m1", amountCents: 100 }], date: "2026-09-20", isSettlement: false,
+    }, "u1");
+    render(<AccountButton onSignIn={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /priya/i }));
+
+    window.confirm = vi.fn(() => false);
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringMatching(/unsynced change/));
+    expect(mockSignOut).not.toHaveBeenCalled();
+
+    window.confirm = vi.fn(() => true);
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(mockSignOut).toHaveBeenCalledTimes(1));
+    Object.defineProperty(navigator, "onLine", { value: true, configurable: true });
+  });
+
+  it("flushes my queue before signing out online", async () => {
+    mockUseConvexAuth.mockReturnValue({ isAuthenticated: true, isLoading: false });
+    mockUseQuery.mockReturnValue({ _id: "u1", name: "Priya", email: "p@x.co" });
+    mockUseConvex.mockReturnValue({ mutation: vi.fn(async () => ({ _id: "real-1" })) });
+    enqueueAdd("g1", {
+      description: "Dinner", amountCents: 100, paidBy: "m1",
+      splits: [{ memberId: "m1", amountCents: 100 }], date: "2026-09-20", isSettlement: false,
+    }, "u1");
+    render(<AccountButton onSignIn={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /priya/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(mockSignOut).toHaveBeenCalledTimes(1));
+    expect(window.confirm).not.toHaveBeenCalled();
+    expect(getOutbox()).toHaveLength(0);
+  });
+
+  it("asks before abandoning ops that fail to flush", async () => {
+    mockUseConvexAuth.mockReturnValue({ isAuthenticated: true, isLoading: false });
+    mockUseQuery.mockReturnValue({ _id: "u1", name: "Priya", email: "p@x.co" });
+    mockUseConvex.mockReturnValue({ mutation: vi.fn(async () => { throw new Error("denied"); }) });
+    enqueueAdd("g1", {
+      description: "Dinner", amountCents: 100, paidBy: "m1",
+      splits: [{ memberId: "m1", amountCents: 100 }], date: "2026-09-20", isSettlement: false,
+    }, "u1");
+    render(<AccountButton onSignIn={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /priya/i }));
+
+    window.confirm = vi.fn(() => false);
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(window.confirm).toHaveBeenCalledWith(expect.stringMatching(/couldn't sync/)));
+    expect(mockSignOut).not.toHaveBeenCalled();
+
+    window.confirm = vi.fn(() => true);
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(mockSignOut).toHaveBeenCalledTimes(1));
+  });
+
+  it("leaves another account's queue alone on sign-out", async () => {
+    mockUseConvexAuth.mockReturnValue({ isAuthenticated: true, isLoading: false });
+    mockUseQuery.mockReturnValue({ _id: "u1", name: "Priya", email: "p@x.co" });
+    const mutation = vi.fn(async () => ({ _id: "real-1" }));
+    mockUseConvex.mockReturnValue({ mutation });
+    enqueueAdd("g1", {
+      description: "Theirs", amountCents: 100, paidBy: "m9",
+      splits: [{ memberId: "m9", amountCents: 100 }], date: "2026-09-20", isSettlement: false,
+    }, "u2");
+    render(<AccountButton onSignIn={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /priya/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(mockSignOut).toHaveBeenCalledTimes(1));
+    expect(mutation).not.toHaveBeenCalled();
+    expect(getOutbox()).toHaveLength(1);
   });
 });
