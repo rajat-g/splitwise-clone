@@ -179,7 +179,7 @@ export function Stat({ label, value, sub, icon, tone = "neutral" }) {
       <span className="min-w-0">
         <span className="block truncate text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</span>
         <span className="tnum block truncate text-base font-bold text-slate-900 dark:text-white">{value}</span>
-        {sub && <span className="block truncate text-[13px] text-slate-600 dark:text-slate-300">{sub}</span>}
+        {sub && <span className="block text-[13px] leading-snug text-slate-600 dark:text-slate-300">{sub}</span>}
       </span>
     </div>
   );

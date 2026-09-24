@@ -818,12 +818,12 @@ export default function GroupPage() {
       )}
 
       {tab === "members" && (
-        <div className="grid items-start gap-4 sm:gap-5 lg:grid-cols-[1.2fr_1fr]">
-          <Card className="p-5 sm:p-6">
+        <div className="grid min-w-0 items-start gap-4 sm:gap-5 lg:grid-cols-[1.2fr_1fr]">
+          <Card className="min-w-0 p-5 sm:p-6">
             <SectionTitle title={`Members · ${activeMembers.length}`} sub={isMember ? "Invite by email — shows their name once they sign up." : "Members can invite, rename and remove. Join the group to manage members."} />
             {isMember ? (
             <form className="mt-4" onSubmit={handleAddMember} noValidate>
-              <div className="grid gap-2.5 min-[520px]:grid-cols-[1.4fr_1fr_auto]">
+              <div className="grid min-w-0 grid-cols-1 gap-2.5 min-[520px]:grid-cols-[1.4fr_1fr_auto]">
                 <TextInput type="email" placeholder="Email — e.g. priya@example.com" value={newMemberEmail}
                   onChange={(e) => {
                     setNewMemberEmail(e.target.value);
@@ -939,7 +939,7 @@ export default function GroupPage() {
               Invite by email — the row shows the email until they sign up, then swaps to their name automatically. Add a temp name to keep the list readable meanwhile. Anyone with the link can view; only members can invite, rename or remove.
             </p>
           </Card>
-          <Card className="p-5 sm:p-6">
+          <Card className="min-w-0 p-5 sm:p-6">
             <SectionTitle title="Invite" sub="Share either — both open the same private group." />
             <div className="mt-4 space-y-3">
               <div className="rounded-2xl border border-slate-200/70 p-3.5 dark:border-white/[0.07]">
