@@ -66,7 +66,7 @@ export default function Layout({ children }) {
               </span>
             </Link>
           </div>
-          <nav aria-label="Primary" className="app-primary-nav mobile-bottom-nav">
+          <nav aria-label="Primary" className="app-primary-nav desktop-primary-nav hidden md:flex">
             <div className="mx-auto flex h-12 w-full max-w-6xl items-center gap-1 px-4 sm:px-6 lg:px-8">
               {NAV.map((n) => (
                 <NavLink key={n.to} to={n.to} end={n.end} className={navCls}>
@@ -98,6 +98,16 @@ export default function Layout({ children }) {
           </div>
         </div>
       </header>
+      <nav aria-label="Primary" className="app-mobile-nav mobile-bottom-nav md:hidden">
+        <div className="mx-auto flex h-12 w-full max-w-6xl items-center gap-1 px-4 sm:px-6 lg:px-8">
+          {NAV.map((n) => (
+            <NavLink key={n.to} to={n.to} end={n.end} className={navCls}>
+              <n.icon className="nav-icon h-[18px] w-[18px]" />
+              <span>{n.label}</span>
+            </NavLink>
+          ))}
+        </div>
+      </nav>
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 pb-24 sm:px-6 sm:py-9 lg:px-8">{children}</main>
       <footer className="mx-auto w-full max-w-7xl px-4 pb-10 pt-4 sm:px-6 lg:px-8 dark:text-slate-500">
         <div className="flex flex-col items-center gap-2.5 border-t border-slate-200/70 pt-5 text-center dark:border-white/[0.07]">

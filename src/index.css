@@ -165,9 +165,12 @@ html.dark [class~="text-slate-600"] { color: #c5cfdd; }
 
 @media (max-width: 767px) {
   .group-dashboard { gap: 0.8rem; }
+  .group-nav { order: -1; }
   .group-overview { border-radius: 1.25rem; }
   .group-overview > div.px-5 { padding: 1.1rem; }
   .group-overview .overview-stats > * { min-height: 4.5rem; }
+  .group-overview .overview-stats > * { gap: 0; padding: 0.7rem 0.8rem; }
+  .group-overview .overview-stats > * > span:first-child { display: none; }
   .group-nav { position: sticky; top: 4.25rem; margin-inline: -0.25rem; }
   .group-nav [role="tablist"] { padding-inline: 0.35rem; }
   .group-nav [role="tab"] { min-width: 3rem; }
@@ -304,7 +307,7 @@ html:not(.dark) body [class~="bg-white"] { background-color: #ffffff; }
 
 @media (max-width: 767px) {
   .app-header-inner { height: 4.25rem; }
-  .app-primary-nav {
+  .app-mobile-nav {
     position: fixed;
     z-index: 40;
     inset-inline: 0;
@@ -315,18 +318,18 @@ html:not(.dark) body [class~="bg-white"] { background-color: #ffffff; }
     backdrop-filter: blur(18px) saturate(1.4);
     -webkit-backdrop-filter: blur(18px) saturate(1.4);
   }
-  .dark .app-primary-nav {
+  .dark .app-mobile-nav {
     border-color: rgb(255 255 255 / 0.1);
     background: rgb(21 27 39 / 0.94);
   }
-  .app-primary-nav > div {
+  .app-mobile-nav > div {
     height: 4rem;
     max-width: 34rem;
     justify-content: space-around;
     gap: 0.35rem;
     padding-inline: 1rem;
   }
-  .app-primary-nav a {
+  .app-mobile-nav a {
     flex: 1;
     justify-content: center;
     flex-direction: column;
@@ -336,7 +339,7 @@ html:not(.dark) body [class~="bg-white"] { background-color: #ffffff; }
     font-size: 0.72rem;
     white-space: nowrap;
   }
-  .app-primary-nav .nav-icon { width: 1.05rem; height: 1.05rem; }
+  .app-mobile-nav .nav-icon { width: 1.05rem; height: 1.05rem; }
   main { padding-bottom: max(6rem, calc(5rem + env(safe-area-inset-bottom, 0px))) !important; }
   input, select, textarea { font-size: max(16px, 1em); }
 }
@@ -355,7 +358,7 @@ html:not(.dark) body [class~="bg-white"] { background-color: #ffffff; }
 }
 
 :where(a, button, input, select, textarea, [tabindex]):focus-visible {
-  outline: 2px solid #668c32;
+  outline: 2px solid #326bd1;
   outline-offset: 2px;
   border-radius: 6px;
 }
