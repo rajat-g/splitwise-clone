@@ -37,18 +37,26 @@ export default function CreateGroup() {
 
   if (!isAuthenticated) {
     return (
-      <div className="mx-auto w-full max-w-xl">
-        <Card className="p-8 text-center sm:p-10">
-          <EmptyState
-            icon={<Icon.Plus className="h-6 w-6" />}
-            title="Sign in to create a group"
-            body="Groups are owned by your free account, so they follow you across devices. Guests can open your invite link and view everything."
-            action={<Button size="lg" onClick={() => setAuthOpen(true)}>Sign in / create account</Button>}
-          />
-        </Card>
-        <p className="mt-3 text-center text-sm text-slate-500 dark:text-slate-400">
-          Have an invite instead? <Link to="/join" className="font-semibold text-teal-700 hover:underline dark:text-teal-300">Join a group</Link>
-        </p>
+      <div className="form-page mx-auto w-full max-w-5xl">
+        <aside className="form-intro">
+          <span className="form-kicker"><Icon.Users className="h-4 w-4" /> Together is simpler</span>
+          <h1 className="mt-4 text-4xl font-black leading-[1.02] tracking-[-0.045em] text-slate-900 sm:text-5xl dark:text-white">Start with a group.</h1>
+          <p className="mt-4 max-w-md text-base leading-relaxed text-slate-600 dark:text-slate-300">Bring every shared cost into one clear place. Your group stays private and follows you across devices.</p>
+          <FormBenefits />
+        </aside>
+        <div className="form-main">
+          <Card className="p-8 text-center sm:p-10">
+            <EmptyState
+              icon={<Icon.Plus className="h-6 w-6" />}
+              title="Sign in to create a group"
+              body="Groups are owned by your free account, so they follow you across devices. Guests can open your invite link and view everything."
+              action={<Button size="lg" onClick={() => setAuthOpen(true)}>Sign in / create account</Button>}
+            />
+          </Card>
+          <p className="mt-3 text-center text-sm text-slate-500 dark:text-slate-400">
+            Have an invite instead? <Link to="/join" className="font-semibold text-teal-700 hover:underline dark:text-teal-300">Join a group</Link>
+          </p>
+        </div>
         {authOpen && <AuthDialog onClose={() => setAuthOpen(false)} />}
       </div>
     );
@@ -86,16 +94,14 @@ export default function CreateGroup() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-xl">
-      <div className="pt-1 sm:pt-2">
-        <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl dark:text-white">
-          Start a new group
-        </h1>
-        <p className="mt-1.5 text-[15px] leading-relaxed text-slate-500 dark:text-slate-400">
-          One for the trip, the flat, or the night out. You&apos;ll get a private link and code to share.
-        </p>
-      </div>
-
+    <div className="form-page mx-auto w-full max-w-5xl">
+      <aside className="form-intro">
+        <span className="form-kicker"><Icon.Users className="h-4 w-4" /> Your people, one place</span>
+        <h1 className="mt-4 text-4xl font-black leading-[1.02] tracking-[-0.045em] text-slate-900 sm:text-5xl dark:text-white">Start a new group</h1>
+        <p className="mt-4 max-w-md text-base leading-relaxed text-slate-600 dark:text-slate-300">One for the trip, the flat, or the night out. You&apos;ll get a private link and code to share.</p>
+        <FormBenefits />
+      </aside>
+      <div className="form-main">
       <Card className="mt-4 p-5 sm:p-7">
         {!editName ? (
           <div className="flex items-center gap-3 rounded-2xl border border-slate-200/70 bg-slate-50/60 px-3.5 py-3 dark:border-white/[0.07] dark:bg-white/[0.03]">
@@ -135,6 +141,24 @@ export default function CreateGroup() {
           </p>
         </form>
       </Card>
+      </div>
     </div>
+  );
+}
+
+function FormBenefits() {
+  return (
+    <ul className="form-benefits">
+      {[
+        [<Icon.Link className="h-5 w-5" />, "Private invite link"],
+        [<Icon.Receipt className="h-5 w-5" />, "Every expense in one feed"],
+        [<Icon.Scale className="h-5 w-5" />, "Balances stay clear"],
+      ].map(([icon, label]) => (
+        <li key={label} className="form-benefit">
+          <span className="form-benefit-icon">{icon}</span>
+          <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">{label}</span>
+        </li>
+      ))}
+    </ul>
   );
 }

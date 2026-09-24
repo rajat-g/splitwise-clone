@@ -11,6 +11,7 @@ function Svg({ children, className = "h-5 w-5", ...rest }) {
 }
 
 export const Icon = {
+  Home: (p) => <Svg {...p}><path d="m3 10 9-7 9 7" /><path d="M5 9v11h14V9M9 20v-6h6v6" /></Svg>,
   Plus: (p) => <Svg {...p}><path d="M12 5v14M5 12h14" /></Svg>,
   Check: (p) => <Svg {...p}><path d="M4 12.5 9.5 18 20 6.5" /></Svg>,
   X: (p) => <Svg {...p}><path d="M6 6l12 12M18 6 6 18" /></Svg>,
@@ -47,7 +48,7 @@ export function Button({ variant = "primary", size, className = "", ...rest }) {
   };
   const variants = {
     primary:
-      "bg-teal-700 text-white hover:bg-teal-800 active:bg-teal-900 shadow-[0_2px_8px_-2px_rgb(15_118_110/0.5)] dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300 dark:shadow-[0_2px_12px_-2px_rgb(45_212_191/0.4)]",
+      "bg-teal-800 text-white hover:bg-teal-900 active:bg-teal-950 shadow-[0_5px_14px_-6px_rgb(24_39_28/0.45)] dark:bg-lime-300 dark:text-slate-950 dark:hover:bg-lime-200 dark:shadow-[0_5px_18px_-6px_rgb(117_168_251/0.34)]",
     secondary:
       "bg-white text-slate-800 border border-slate-200 shadow-[0_1px_2px_rgb(15_23_42/0.06)] hover:bg-slate-50 hover:border-slate-300 active:bg-slate-100 dark:bg-white/[0.06] dark:text-slate-100 dark:border-white/10 dark:hover:bg-white/10 dark:hover:border-white/15",
     soft:
@@ -89,7 +90,7 @@ export function Select(props) {
 export function Card({ className = "", ...rest }) {
   return (
     <section
-      className={`rounded-[20px] border border-slate-200/70 bg-white shadow-[var(--shadow-card)] dark:border-white/[0.08] dark:bg-[#0e1621] dark:shadow-[0_1px_2px_rgb(0_0_0/0.4)] ${className}`}
+      className={`rounded-[24px] border border-slate-200/80 bg-white shadow-[0_1px_2px_rgb(24_35_52/0.04),0_16px_40px_-30px_rgb(24_35_52/0.24)] dark:border-white/[0.09] dark:bg-[#202838] dark:shadow-[0_10px_28px_-20px_rgb(0_0_0/0.72)] ${className}`}
       {...rest}
     />
   );
@@ -176,9 +177,9 @@ export function Stat({ label, value, sub, icon, tone = "neutral" }) {
         </span>
       )}
       <span className="min-w-0">
-        <span className="block truncate text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">{label}</span>
-        <span className="tnum block truncate text-[15px] font-bold text-slate-900 dark:text-white">{value}</span>
-        {sub && <span className="block truncate text-xs text-slate-500 dark:text-slate-400">{sub}</span>}
+        <span className="block truncate text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</span>
+        <span className="tnum block truncate text-base font-bold text-slate-900 dark:text-white">{value}</span>
+        {sub && <span className="block truncate text-[13px] text-slate-600 dark:text-slate-300">{sub}</span>}
       </span>
     </div>
   );
@@ -239,7 +240,7 @@ export function Tabs({ options, value, onChange, className = "" }) {
           <button key={v} role="tab" aria-selected={active} onClick={() => onChange(v)}
             className={`flex min-h-[2.75rem] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl px-3 text-sm font-semibold transition-all duration-150 cursor-pointer sm:px-4 ${
               active
-                ? "bg-slate-900 text-white shadow-[0_2px_8px_-2px_rgb(15_23_42/0.4)] dark:bg-white dark:text-slate-900"
+                ? "bg-lime-200 text-emerald-950 shadow-[0_3px_10px_-4px_rgb(55_78_39/0.35)] dark:bg-lime-300 dark:text-emerald-950"
                 : "text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-white/[0.06] dark:hover:text-slate-100"
             }`}>
             {IconCmp && <IconCmp className="h-4 w-4 shrink-0" />}

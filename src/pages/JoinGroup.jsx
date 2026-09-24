@@ -4,7 +4,7 @@ import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { normalizeInviteCode } from "../lib/split";
 import { getDisplayName, setDisplayName } from "../lib/identity";
-import { Alert, Button, Card, Field, TextInput } from "../components/ui";
+import { Alert, Button, Card, Field, Icon, TextInput } from "../components/ui";
 
 export default function JoinGroup() {
   const nav = useNavigate();
@@ -49,17 +49,24 @@ export default function JoinGroup() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-xl">
-      <div className="pt-1 sm:pt-2">
-        <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl dark:text-white">
+    <div className="form-page mx-auto w-full max-w-5xl">
+      <aside className="form-intro">
+        <span className="form-kicker"><Icon.Link className="h-4 w-4" /> Open a shared space</span>
+        <h1 className="mt-4 text-4xl font-black leading-[1.02] tracking-[-0.045em] text-slate-900 sm:text-5xl dark:text-white">
           Join with an invite
         </h1>
-        <p className="mt-1.5 text-[15px] leading-relaxed text-slate-500 dark:text-slate-400">
+        <p className="mt-4 max-w-md text-base leading-relaxed text-slate-600 dark:text-slate-300">
           Paste the link or 10-character code your friend shared. No account needed to look around — sign in only to add.
         </p>
-      </div>
+        <ul className="form-benefits">
+          <li className="form-benefit"><span className="form-benefit-icon"><Icon.Zap className="h-5 w-5" /></span><span className="text-sm font-semibold text-slate-700 dark:text-slate-200">See updates as they happen</span></li>
+          <li className="form-benefit"><span className="form-benefit-icon"><Icon.Scale className="h-5 w-5" /></span><span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Check balances at a glance</span></li>
+          <li className="form-benefit"><span className="form-benefit-icon"><Icon.Shield className="h-5 w-5" /></span><span className="text-sm font-semibold text-slate-700 dark:text-slate-200">No account needed to view</span></li>
+        </ul>
+      </aside>
 
-      <Card className="mt-4 p-5 sm:p-7">
+      <div className="form-main">
+      <Card className="p-5 sm:p-7">
         <form onSubmit={handleJoin} className="space-y-3.5">
           <Field label="Invite link or code">
             <TextInput placeholder="Paste link or code" value={joinInput}
@@ -84,6 +91,7 @@ export default function JoinGroup() {
       <p className="mt-3 text-center text-sm text-slate-500 dark:text-slate-400">
         No invite yet? <Link to="/create" className="font-semibold text-teal-700 hover:underline dark:text-teal-300">Create a group</Link>
       </p>
+      </div>
     </div>
   );
 }

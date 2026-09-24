@@ -8,16 +8,16 @@ import { AccountButton, AuthDialog } from "./Auth";
 const THEME_KEY = "fairsplit:theme";
 
 const NAV = [
-  { to: "/", label: "Home", end: true },
-  { to: "/create", label: "Create group" },
-  { to: "/join", label: "Join" },
+  { to: "/", label: "Home", icon: Icon.Home, end: true },
+  { to: "/create", label: "Create group", icon: Icon.Plus },
+  { to: "/join", label: "Join", icon: Icon.Link },
 ];
 
 function navCls({ isActive }) {
-  return `flex min-h-[2.5rem] items-center rounded-lg px-3 text-sm font-semibold transition-colors ${
+  return `flex min-h-[2.65rem] items-center rounded-xl px-4 text-[13px] font-bold transition-colors ${
     isActive
-      ? "bg-slate-900/[0.07] text-slate-900 dark:bg-white/10 dark:text-white"
-      : "text-slate-500 hover:bg-slate-900/[0.04] hover:text-slate-800 dark:text-slate-400 dark:hover:bg-white/[0.06] dark:hover:text-slate-100"
+      ? "bg-lime-200 text-emerald-950 dark:bg-lime-300/15 dark:text-lime-200"
+      : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-white/[0.06] dark:hover:text-slate-100"
   }`;
 }
 
@@ -37,15 +37,15 @@ export default function Layout({ children }) {
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
     document.querySelector('meta[name="theme-color"]')?.setAttribute(
-      "content", theme === "dark" ? "#070c13" : "#ffffff"
+      "content", theme === "dark" ? "#151b27" : "#f4f6fa"
     );
     localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
 
   return (
     <div className="flex min-h-dvh flex-col">
-      <header className="sticky top-0 z-30 border-b border-slate-200/70 bg-white/80 backdrop-blur-xl dark:border-white/[0.08] dark:bg-[#070c13]/80">
-        <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
+      <header className="app-header sticky top-0 z-30 border-b border-slate-200/70 bg-white/90 backdrop-blur-xl dark:border-white/[0.08] dark:bg-[#151b27]/90">
+        <div className="app-header-inner mx-auto flex h-[4.5rem] w-full max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-2">
             {pathname !== "/" && (
               <Link to="/" aria-label="Back to home"
@@ -55,7 +55,7 @@ export default function Layout({ children }) {
             )}
             <Link to="/" className="flex min-w-0 items-center gap-2.5" aria-label="FairSplit home">
               <img src="/icons/icon.svg" alt="" aria-hidden="true"
-                className="h-9 w-9 shrink-0 rounded-[10px] shadow-[0_2px_8px_-2px_rgb(13_148_136/0.6)]" />
+                className="h-10 w-10 shrink-0 rounded-[13px] shadow-[0_5px_14px_-7px_rgb(20_39_29/0.7)]" />
               <span className="min-w-0">
                 <span className="block truncate text-[17px] font-extrabold leading-none tracking-tight text-slate-900 dark:text-white">
                   FairSplit
@@ -66,6 +66,16 @@ export default function Layout({ children }) {
               </span>
             </Link>
           </div>
+          <nav aria-label="Primary" className="app-primary-nav mobile-bottom-nav">
+            <div className="mx-auto flex h-12 w-full max-w-6xl items-center gap-1 px-4 sm:px-6 lg:px-8">
+              {NAV.map((n) => (
+                <NavLink key={n.to} to={n.to} end={n.end} className={navCls}>
+                  <n.icon className="nav-icon h-[18px] w-[18px]" />
+                  <span>{n.label}</span>
+                </NavLink>
+              ))}
+            </div>
+          </nav>
           <div className="flex shrink-0 items-center gap-2">
             {!isAuthenticated && name ? (
               <span className="hidden min-w-0 items-center gap-2 rounded-full border border-slate-200 bg-white py-1 pl-1 pr-3 text-sm font-medium text-slate-700 min-[480px]:flex dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200">
@@ -73,7 +83,7 @@ export default function Layout({ children }) {
                 <span className="max-w-28 truncate">{name}</span>
               </span>
             ) : !isAuthenticated ? (
-              <span className="hidden rounded-full bg-teal-700/10 px-3 py-1.5 text-xs font-semibold text-teal-800 min-[560px]:inline-block dark:bg-teal-400/10 dark:text-teal-200">
+              <span className="hidden rounded-full bg-lime-100 px-3 py-1.5 text-xs font-semibold text-emerald-900 min-[560px]:inline-block dark:bg-lime-300/10 dark:text-lime-200">
                 Guests view free
               </span>
             ) : null}
@@ -87,18 +97,9 @@ export default function Layout({ children }) {
             </button>
           </div>
         </div>
-        <nav aria-label="Primary">
-          <div className="mx-auto flex h-12 w-full max-w-6xl items-center gap-1 px-4 sm:px-6 lg:px-8">
-            {NAV.map((n) => (
-              <NavLink key={n.to} to={n.to} end={n.end} className={navCls}>
-                {n.label}
-              </NavLink>
-            ))}
-          </div>
-        </nav>
       </header>
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-5 sm:px-6 sm:py-8 lg:px-8">{children}</main>
-      <footer className="mx-auto w-full max-w-6xl px-4 pb-10 pt-4 sm:px-6 lg:px-8 dark:text-slate-500">
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 pb-24 sm:px-6 sm:py-9 lg:px-8">{children}</main>
+      <footer className="mx-auto w-full max-w-7xl px-4 pb-10 pt-4 sm:px-6 lg:px-8 dark:text-slate-500">
         <div className="flex flex-col items-center gap-2.5 border-t border-slate-200/70 pt-5 text-center dark:border-white/[0.07]">
           <div className="flex flex-wrap items-center justify-center gap-1.5 text-[11px] font-semibold">
             {["Private by link", "Free accounts", "Live balances", "Free forever"].map((t) => (

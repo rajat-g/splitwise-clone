@@ -557,9 +557,10 @@ export default function GroupPage() {
         onDiscard={(opId) => dropOp(opId)}
         onAdopt={(opId) => adoptOp(opId, viewer?._id ?? null)}
       />
-      {/* Group header */}
-      <Card className="overflow-hidden">
-        <div aria-hidden="true" className="h-1 bg-gradient-to-r from-teal-600 via-teal-500 to-emerald-400" />
+      <div className="group-dashboard">
+      {/* Group overview and section navigation */}
+      <Card className="group-overview overflow-hidden">
+        <div aria-hidden="true" className="h-1 bg-gradient-to-r from-teal-700 via-teal-500 to-teal-300" />
         <div className="px-5 pb-5 pt-5 sm:px-6 sm:pb-6 sm:pt-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3.5">
@@ -577,7 +578,7 @@ export default function GroupPage() {
                 </p>
               </div>
             </div>
-            <div className="hidden gap-2 md:flex">
+            <div className="group-overview-actions hidden gap-2 md:flex">
               {isMember ? (
                 <>
                   <Button variant="secondary" onClick={() => openSettle()}>
@@ -599,8 +600,8 @@ export default function GroupPage() {
             </div>
           </div>
 
-          {/* Stats: 2-col mobile, 4-col desktop */}
-          <div className="mt-4 grid grid-cols-2 gap-2 sm:gap-2.5 lg:grid-cols-4">
+          {/* Stats: compact on phones, evenly readable on desktop */}
+          <div className="overview-stats mt-5 grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4">
             <Stat label="Total spent" value={fmt(fromCents(totalCents), currency)} sub={`${expenseCount} expenses`} icon={<Icon.Receipt className="h-4 w-4" />} tone="teal" />
             <Stat label="Outstanding" value={fmt(outstanding, currency)} sub={settlements.length ? `${settlements.length} payment${settlements.length === 1 ? "" : "s"} left` : "All settled"} icon={<Icon.Scale className="h-4 w-4" />} tone={settlements.length ? "amber" : "emerald"} />
             <Stat label="Settlements" value={String(settlementCount)} sub="recorded payments" icon={<Icon.Wallet className="h-4 w-4" />} tone="neutral" />
@@ -643,8 +644,8 @@ export default function GroupPage() {
         </div>
       </Card>
 
-      {/* Sticky offset = header row (64) + nav (48) + header border (1) */}
-      <div className="sticky top-[113px] z-20">
+      {/* Keep the group sections easy to reach without taking space from the overview. */}
+      <div className="group-nav sticky top-[4.5rem] z-20">
         <Tabs
           value={tab} onChange={setTab}
           options={[
@@ -658,6 +659,7 @@ export default function GroupPage() {
           ]}
         />
       </div>
+      <section className="group-content" aria-label="Group details">
 
       {tab === "expenses" && (
         <Card className="overflow-hidden">
@@ -978,9 +980,11 @@ export default function GroupPage() {
           )}
         </Card>
       )}
+      </section>
+      </div>
 
       {/* Thumb-reach actions on phones + small tablets */}
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200/70 bg-white/90 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl md:hidden dark:border-white/10 dark:bg-[#070c13]/85">
+      <div className="group-mobile-actions fixed inset-x-0 bottom-0 z-30 border-t border-slate-200/70 bg-white/90 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl md:hidden dark:border-white/10 dark:bg-[#070c13]/85">
         {isMember ? (
         <div className="mx-auto grid max-w-6xl grid-cols-2 gap-2.5">
           <Button variant="secondary" onClick={() => openSettle()} className="!min-h-[3rem]">

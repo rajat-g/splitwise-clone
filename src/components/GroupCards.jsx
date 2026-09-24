@@ -30,7 +30,7 @@ export function MyGroups() {
         <Badge tone="teal">Synced to account</Badge>
       </div>
       <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">Groups you created while signed in — available on any device.</p>
-      <div className="mt-3 grid gap-2 min-[480px]:grid-cols-2">
+      <div className="home-group-list mt-3 grid gap-2 min-[480px]:grid-cols-2">
         {myGroups.map((g) => (
           <button key={g.publicId} onClick={() => nav(`/g/${g.publicId}`)}
             className="flex min-h-[3.25rem] items-center gap-2.5 rounded-2xl border border-slate-200/70 bg-slate-50/50 px-2.5 py-2 text-left transition-all hover:border-slate-300 hover:bg-white hover:shadow-[var(--shadow-card)] cursor-pointer dark:border-white/[0.08] dark:bg-white/[0.03] dark:hover:border-white/15 dark:hover:bg-white/[0.06]">
@@ -61,7 +61,7 @@ export function RecentGroups() {
         </div>
         <AvatarStack names={recent.map((g) => g.name)} className="hidden shrink-0 min-[480px]:flex" />
       </div>
-      <div className="mt-3.5 grid gap-2 min-[480px]:grid-cols-2 lg:grid-cols-3">
+      <div className="home-group-list mt-3.5 grid gap-2 min-[480px]:grid-cols-2 lg:grid-cols-3">
         {recent.map((g) => (
           <button key={g.id} onClick={() => nav(`/g/${g.id}`)}
             className="flex min-h-[3.25rem] items-center gap-2.5 rounded-2xl border border-slate-200/70 bg-slate-50/50 px-2.5 py-2 text-left text-sm font-medium text-slate-800 transition-all hover:border-slate-300 hover:bg-white hover:shadow-[var(--shadow-card)] cursor-pointer dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-slate-100 dark:hover:border-white/15 dark:hover:bg-white/[0.06]">

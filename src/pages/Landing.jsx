@@ -17,12 +17,12 @@ const TRUST = [
 
 export default function Landing() {
   return (
-    <div className="space-y-5 sm:space-y-6">
+    <div className="home-page">
       {/* Hero */}
-      <div className="relative overflow-hidden rounded-[24px] border border-slate-200/70 bg-white px-5 py-7 sm:px-8 sm:py-10 lg:px-10 dark:border-white/[0.08] dark:bg-[#0e1621]">
+      <div className="landing-hero relative overflow-hidden rounded-[30px] border border-lime-200/70 bg-lime-100 px-5 py-7 sm:px-8 sm:py-10 lg:px-11 lg:py-12 dark:border-white/[0.08] dark:bg-[#202838]">
         <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-          <div className="absolute -top-24 right-[-80px] h-72 w-72 rounded-full bg-teal-500/15 blur-3xl dark:bg-teal-400/10" />
-          <div className="absolute -bottom-28 left-[-60px] h-64 w-64 rounded-full bg-sky-500/10 blur-3xl dark:bg-sky-400/[0.07]" />
+          <div className="absolute -top-24 right-[-80px] h-72 w-72 rounded-full bg-lime-400/20 blur-3xl dark:bg-lime-300/10" />
+          <div className="absolute -bottom-28 left-[-60px] h-64 w-64 rounded-full bg-amber-300/20 blur-3xl dark:bg-amber-300/[0.07]" />
         </div>
         <div className="relative grid items-center gap-7 lg:grid-cols-[1.25fr_1fr] lg:gap-10">
           <div className="min-w-0">
@@ -30,7 +30,7 @@ export default function Landing() {
               <Badge tone="teal"><span className="h-1.5 w-1.5 rounded-full bg-current" /> Free · Guests view · Members add</Badge>
               <Badge tone="neutral" className="hidden min-[480px]:inline-flex">Mobile + desktop</Badge>
             </div>
-            <h1 className="mt-3 max-w-xl text-balance text-[28px] font-extrabold leading-[1.08] tracking-tight text-slate-900 sm:text-4xl lg:text-[44px] dark:text-white">
+            <h1 className="mt-4 max-w-xl text-balance text-[30px] font-black leading-[1.02] tracking-[-0.045em] text-slate-900 sm:text-4xl lg:text-[52px] dark:text-white">
               Split bills with friends, settle up in seconds
             </h1>
             <p className="mt-2.5 max-w-xl text-pretty text-[15px] leading-relaxed text-slate-500 sm:text-base dark:text-slate-400">
@@ -95,8 +95,10 @@ export default function Landing() {
         </div>
       </div>
 
-      <MyGroups />
-      <RecentGroups />
+      <div className="home-groups">
+        <MyGroups />
+        <RecentGroups />
+      </div>
 
       <div className="grid items-start gap-4 sm:gap-5 lg:grid-cols-2">
         <Card className="p-5 sm:p-6">
