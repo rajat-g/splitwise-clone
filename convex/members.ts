@@ -35,9 +35,11 @@ function isLeft(m: Pick<Doc<"members">, "status">) {
 /** Best-effort lookup of a registered user by email (for instant name + link). */
 async function findUserByEmail(ctx: MutationCtx, email: string): Promise<Doc<"users"> | null> {
   try {
+    // Indexed ("email" comes from authTables) — never a table scan, even as
+    // the user base grows: this is global identity data.
     const user = await ctx.db
       .query("users")
-      .filter((q) => q.eq(q.field("email"), email))
+      .withIndex("email", (q) => q.eq("email", email))
       .first();
     return user ?? null;
   } catch {
