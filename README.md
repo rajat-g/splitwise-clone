@@ -100,7 +100,7 @@ npx convex env set SITE_URL https://your-app.vercel.app --prod
 | `.env` / Vercel | `VITE_CONVEX_URL` | Convex dev or prod URL |
 | Convex backend | `JWT_PRIVATE_KEY` | Auth signing key (from generator script) |
 | Convex backend | `JWKS` | Auth public keys (from generator script) |
-| Convex backend | `SITE_URL` | Dev (`http://localhost:5173`) and prod (`--prod`) app URL |
+| Convex backend | `SITE_URL` | Dev (`http://localhost:5173`) and prod (`--prod`) app URL — **required**: the auth library resolves it on every OTP email send; missing it fails signup/sign-in with `Missing environment variable SITE_URL` (backend env — `.env.local` does NOT reach backend functions) |
 
 See `.env.example`.
 

@@ -102,4 +102,6 @@ try {
 console.log(
   `\nDone. Next: run "npx convex dev"${PROD ? ' (or "npx convex deploy")' : ""} to push functions, then sign in from the app header.`
 );
-console.log("Note: SITE_URL is only needed for OAuth/magic-link providers — not for email + password.");
+console.log("Note: SITE_URL is required for any email flow (OTP verification, reset) — set it per deployment:");
+console.log('  npx convex env set SITE_URL http://localhost:5173            (local dev)');
+console.log('  npx convex env set SITE_URL https://your-app.vercel.app --prod  (production)');
