@@ -1,9 +1,8 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { resolveActorName } from "./identity";
-import { requireGroupMember } from "./authz";
-import type { Id } from "./_generated/dataModel";
+import { resolveActorName, userEmailVerified } from "./identity";
+import { requireGroupMember } from "./authz";import type { Id } from "./_generated/dataModel";
 
 async function requireAuth(ctx: any) {
   const userId = await getAuthUserId(ctx);
@@ -163,10 +162,13 @@ export const add = mutation({
         return { _id: dupEmail._id, name: dupEmail.name };
       }
 
-      // If this email already has an account, link it now and show their real name.
+      // If this email already has a VERIFIED account, link it now and show
+      // their real name. Unverified matches stay pending: an unproven email
+      // string must never confer membership.
       const linkedUser = await findUserByEmail(ctx, email);
-      const linkedUserId = (linkedUser?._id ?? null) as Id<"users"> | null;
-      const display = linkedUser ? profileNameOf(linkedUser, email) : tempName || email;
+      const linkedUserId =
+        linkedUser && userEmailVerified(linkedUser) ? (linkedUser._id as Id<"users">) : null;
+      const display = linkedUserId && linkedUser ? profileNameOf(linkedUser, email) : tempName || email;
 
       const now = Date.now();
       const doc: Record<string, unknown> = {
@@ -180,7 +182,7 @@ export const add = mutation({
       const detail = display !== email ? ` (${email})` : "";
       await ctx.db.insert("activity", {
         groupId: g._id, type: "member_added",
-        text: linkedUser ? `${display} joined the group` : `${display}${detail} was invited`,
+        text: linkedUserId ? `${display} joined the group` : `${display}${detail} was invited`,
         actorName: display, createdAt: now,
       });
       return { _id, name: display };
@@ -237,8 +239,10 @@ export const join = mutation({
     const email = ((user as { email?: unknown } | null)?.email as string | undefined ?? "").trim().toLowerCase();
     const realName = user ? profileNameOf(user, email || "member") : "Member";
 
-    // Pending email invite for this address? Link it instead of duplicating.
-    if (email) {
+    // Pending email invite for this address? Link it instead of duplicating —
+    // but only with mailbox proof: unverified viewers get a fresh row and
+    // merge later, once verified, via claim.
+    if (email && userEmailVerified(user)) {
       const pending = existing.find(
         (m) => (((m as { email?: unknown }).email as string | undefined) ?? "").toLowerCase() === email
           && !(m as { userId?: unknown }).userId
@@ -291,6 +295,9 @@ export const claim = mutation({
     if (!user) return { claimed: 0 };
     const email = ((user as { email?: unknown }).email as string | undefined ?? "").trim().toLowerCase();
     if (!email || !EMAIL_RE.test(email)) return { claimed: 0 };
+    // Linking by email string requires mailbox proof — unverified accounts
+    // (including legacy never-verified ones) must verify first.
+    if (!userEmailVerified(user)) return { claimed: 0 };
     const realName = profileNameOf(user, email);
 
     const members = await ctx.db.query("members").withIndex("by_group", (q) => q.eq("groupId", g._id)).collect();

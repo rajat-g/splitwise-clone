@@ -6,7 +6,7 @@ import { convexTest } from "convex-test";
 import { describe, expect, it } from "vitest";
 import { api } from "./_generated/api";
 import schema from "./schema";
-import { seedGroup, seedUser } from "./testUtils";
+import { seedGroup, seedUser, verifyUser } from "./testUtils";
 
 const modules = import.meta.glob("./**/*.ts");
 function fresh() {
@@ -18,9 +18,9 @@ async function setupOutsider() {
   const t = fresh();
   const { authed: alice } = await seedUser(t, { name: "Alice", email: "alice@x.co" });
   const g = await seedGroup(alice, { creatorName: "Alice" });
-  const { authed: mallory } = await seedUser(t, { name: "Mallory", email: "mallory@x.co" });
+  const { authed: mallory, userId: malloryId } = await seedUser(t, { name: "Mallory", email: "mallory@x.co" });
   const members = await t.query(api.members.list, { publicId: g.publicId });
-  return { t, alice, mallory, g, creator: members[0] };
+  return { t, alice, mallory, malloryId, g, creator: members[0] };
 }
 
 describe("outsiders cannot write", () => {
@@ -78,7 +78,8 @@ describe("members can transact but not rotate", () => {
   async function setupMember() {
     const base = await setupOutsider();
     const { alice, g } = base;
-    // Alice invites Mallory (account exists → linked immediately as a member).
+    // Alice invites Mallory (verified account → linked immediately as a member).
+    await verifyUser(base.t, base.malloryId);
     await alice.mutation(api.members.add, { publicId: g.publicId, email: "mallory@x.co" });
     const members = await alice.query(api.members.list, { publicId: g.publicId });
     const malloryRow = members.find((m) => "email" in m && m.email === "mallory@x.co")!;
@@ -123,8 +124,7 @@ describe("members.join", () => {
   it("creates a linked row, idempotently", async () => {
     const { mallory, g } = await setupOutsider();
     const first = await mallory.mutation(api.members.join, { publicId: g.publicId });
-    expect(first.name).toBe("Mallory");
-    const members = await mallory.query(api.members.list, { publicId: g.publicId });
+    expect(first.name).toBe("Mallory");    const members = await mallory.query(api.members.list, { publicId: g.publicId });
     expect(members.find((m) => m.name === "Mallory")).toMatchObject({ email: "mallory@x.co" });
     const second = await mallory.mutation(api.members.join, { publicId: g.publicId });
     expect(second._id).toEqual(first._id);
@@ -139,12 +139,28 @@ describe("members.join", () => {
     expect(_id).toBeTruthy();
   });
 
+  it("unverified joiners don't absorb pending invites", async () => {
+    const { alice, t, g } = await setupOutsider();
+    await alice.mutation(api.members.add, { publicId: g.publicId, email: "mallory@x.co" });
+    const { authed: mallory } = await seedUser(t, { name: "Mallory", email: "mallory@x.co" });
+    // Mallory is UNVERIFIED: join creates a fresh row; the pending invite
+    // stays untouched until mailbox proof arrives via claim.
+    const res = await mallory.mutation(api.members.join, { publicId: g.publicId });
+    const rows = await alice.query(api.members.list, { publicId: g.publicId });
+    const matching = rows.filter((m) => "email" in m && m.email === "mallory@x.co");
+    expect(matching).toHaveLength(2);
+    const freshRow = matching.find((m) => "userId" in m && m.userId);
+    expect(res._id).toEqual(freshRow!._id);
+    expect(matching.some((m) => !("userId" in m) || !m.userId)).toBe(true);
+  });
+
   it("links a pending invite instead of duplicating", async () => {
     const t = fresh();
     const { authed: alice } = await seedUser(t, { name: "Alice", email: "alice@x.co" });
     const g = await seedGroup(alice, { creatorName: "Alice" });
     await alice.mutation(api.members.add, { publicId: g.publicId, email: "ghost@x.co" });
-    const { authed: ghost } = await seedUser(t, { name: "Ghost Real", email: "ghost@x.co" });
+    const { authed: ghost, userId: ghostId } = await seedUser(t, { name: "Ghost Real", email: "ghost@x.co" });
+    await verifyUser(t, ghostId);
     const res = await ghost.mutation(api.members.join, { publicId: g.publicId });
     expect(res.name).toBe("Ghost Real");
     const members = await ghost.query(api.members.list, { publicId: g.publicId });
@@ -286,7 +302,8 @@ describe("soft-deleted members keep history readable", () => {
 
     // Leave again, then rejoin via join (no temp name → keeps row name).
     await alice.mutation(api.members.remove, { publicId: g.publicId, memberId: zed._id });
-    const { authed: zedAuth } = await seedUser(t, { name: "Zeddy", email: "zed@x.co" });
+    const { authed: zedAuth, userId: zedId } = await seedUser(t, { name: "Zeddy", email: "zed@x.co" });
+    await verifyUser(t, zedId);
     const rejoined = await zedAuth.mutation(api.members.join, { publicId: g.publicId });
     expect(rejoined._id).toEqual(zed._id);
     members = await zedAuth.query(api.members.list, { publicId: g.publicId });

@@ -3,7 +3,7 @@ import { convexTest } from "convex-test";
 import { describe, expect, it } from "vitest";
 import { api } from "./_generated/api";
 import schema from "./schema";
-import { seedGroup, seedUser } from "./testUtils";
+import { seedGroup, seedUser, verifyUser } from "./testUtils";
 
 const modules = import.meta.glob("./**/*.ts");
 function fresh() {
@@ -46,17 +46,55 @@ describe("members.add", () => {
     expect(members.find((m) => "email" in m && m.email === "rahul@example.com")?.name).toBe("rahul@example.com");
   });
 
-  it("links and names instantly when the email already has an account", async () => {
+  it("links instantly when the email has a VERIFIED account, else stays pending", async () => {
     const { authed, t, g } = await setup();
     const { userId } = await seedUser(t, { name: "Sofia Real", email: "sofia@example.com" });
-    const res = await authed.mutation(api.members.add, {
+    // Unverified match: no link, no name leak — still a pending invite.
+    await authed.mutation(api.members.add, {
       publicId: g.publicId,
       email: "sofia@example.com",
       name: "Sofi-temp",
     });
-    expect(res.name).toBe("Sofia Real");
+    let members = await authed.query(api.members.list, { publicId: g.publicId });
+    expect(members.find((m) => "email" in m && m.email === "sofia@example.com")).toMatchObject({
+      name: "Sofi-temp",
+    });
+    expect(members.find((m) => "email" in m && m.email === "sofia@example.com" && "userId" in m && m.userId)).toBeUndefined();
+
+    // After mailbox proof, claiming links; a custom temp name is kept…
+    await verifyUser(t, userId);
+    const sofia = t.withIdentity({ subject: userId });
+    const { claimed } = await sofia.mutation(api.members.claim, { publicId: g.publicId });
+    expect(claimed).toBe(1);
+    members = await authed.query(api.members.list, { publicId: g.publicId });
+    expect(members.find((m) => "email" in m && m.email === "sofia@example.com")).toMatchObject({
+      name: "Sofi-temp",
+      userId,
+    });
+
+    // …while an email-fallback display swaps to the real profile name.
+    await authed.mutation(api.members.add, { publicId: g.publicId, email: "tina@x.co" });
+    const { userId: tinaId } = await seedUser(t, { name: "Tina Real", email: "tina@x.co" });
+    await verifyUser(t, tinaId);
+    const { claimed: claimed2 } = await t
+      .withIdentity({ subject: tinaId })
+      .mutation(api.members.claim, { publicId: g.publicId });
+    expect(claimed2).toBe(1);
+    members = await authed.query(api.members.list, { publicId: g.publicId });
+    expect(members.find((m) => "email" in m && m.email === "tina@x.co")).toMatchObject({
+      name: "Tina Real",
+      userId: tinaId,
+    });
+  });
+
+  it("never links invites to unverified accounts on claim", async () => {
+    const { authed, t, g } = await setup();
+    await authed.mutation(api.members.add, { publicId: g.publicId, email: "zed@x.co" });
+    const { userId: zedId } = await seedUser(t, { name: "Zed", email: "zed@x.co" });
+    const zed = t.withIdentity({ subject: zedId });
+    expect(await zed.mutation(api.members.claim, { publicId: g.publicId })).toEqual({ claimed: 0 });
     const members = await authed.query(api.members.list, { publicId: g.publicId });
-    expect(members.find((m) => "email" in m && m.email === "sofia@example.com")).toMatchObject({ userId });
+    expect(members.find((m) => "email" in m && m.email === "zed@x.co" && "userId" in m && m.userId)).toBeUndefined();
   });
 
   it("is idempotent for duplicate emails and caps group size messaging", async () => {
@@ -103,6 +141,7 @@ describe("members.claim", () => {
     // Invite BEFORE the account exists so the row stays pending.
     await authed.mutation(api.members.add, { publicId: g.publicId, email: "rahul@example.com" });
     const { userId: rahulId } = await seedUser(t, { name: "Rahul Real", email: "rahul@example.com" });
+    await verifyUser(t, rahulId);
 
     const rahul = t.withIdentity({ subject: rahulId });
     const { claimed } = await rahul.mutation(api.members.claim, { publicId: g.publicId });
@@ -118,6 +157,7 @@ describe("members.claim", () => {
     const { authed, t, g } = await setup();
     await authed.mutation(api.members.add, { publicId: g.publicId, email: "bo@example.com", name: "Bobby" });
     const { userId: boId } = await seedUser(t, { name: "Bo Real", email: "bo@example.com" });
+    await verifyUser(t, boId);
     const boAuth = t.withIdentity({ subject: boId });
     await boAuth.mutation(api.members.claim, { publicId: g.publicId });
     const members = await boAuth.query(api.members.list, { publicId: g.publicId });
@@ -136,6 +176,7 @@ describe("members.claim", () => {
   it("upgrades an email-fallback name on an already-linked row", async () => {
     const { authed, t, g } = await setup();
     const { userId } = await seedUser(t, { name: "Bo Real", email: "bo@example.com" });
+    await verifyUser(t, userId);
     const { _id } = await authed.mutation(api.members.add, {
       publicId: g.publicId, email: "bo@example.com",
     });
@@ -155,6 +196,7 @@ describe("members.claim", () => {
   it("upgrades whitespace-only profile names to the email prefix", async () => {
     const { authed, t, g } = await setup();
     const { userId } = await seedUser(t, { name: "   ", email: "pl@example.com" });
+    await verifyUser(t, userId);
     await authed.mutation(api.members.add, { publicId: g.publicId, email: "pl@example.com" });
     const members = await authed.query(api.members.list, { publicId: g.publicId });
     // findUserByEmail links instantly; blank profile name falls back to prefix.

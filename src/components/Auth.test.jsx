@@ -29,7 +29,7 @@ beforeEach(() => {
   mockUseQuery.mockReset().mockReturnValue(undefined);
   mockUseConvex.mockReset().mockReturnValue({});
   mockUseConvexAuth.mockReset().mockReturnValue({ isAuthenticated: false, isLoading: false });
-  mockSignIn.mockReset().mockResolvedValue(undefined);
+  mockSignIn.mockReset().mockResolvedValue({ signingIn: true });
   mockSignOut.mockReset().mockResolvedValue(undefined);
   window.confirm = vi.fn(() => true);
 });
@@ -112,6 +112,64 @@ describe("AuthDialog", () => {
     expect(screen.getByText("Create your account")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /^sign in$/i }));
     expect(screen.getByText("Welcome back")).toBeInTheDocument();
+  });
+
+  it("moves to the code step when no session is issued, then verifies", async () => {
+    mockSignIn
+      .mockResolvedValueOnce({ signingIn: false })
+      .mockResolvedValueOnce({ signingIn: true });
+    const onClose = vi.fn();
+    render(<AuthDialog onClose={onClose} />);
+    fireEvent.click(screen.getByRole("button", { name: /create account/i }));
+    fillSignup();
+    fireEvent.click(screen.getByRole("button", { name: /^create free account$/i }));
+    await waitFor(() => expect(screen.getByText("Check your email")).toBeInTheDocument());
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByText(/account created/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("123456"), { target: { value: "12ab34cd" } });
+    expect(screen.getByDisplayValue("1234")).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("123456"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: /verify and sign in/i }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    const [, codeForm] = mockSignIn.mock.calls[1];
+    expect(codeForm.get("flow")).toBe("email-verification");
+    expect(codeForm.get("code")).toBe("123456");
+  });
+
+  it("rejects short codes locally and wrong codes kindly", async () => {
+    mockSignIn.mockResolvedValue({ signingIn: false });
+    render(<AuthDialog onClose={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /create account/i }));
+    fillSignup();
+    fireEvent.click(screen.getByRole("button", { name: /^create free account$/i }));
+    await waitFor(() => expect(screen.getByText("Check your email")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByPlaceholderText("123456"), { target: { value: "123" } });
+    expect(screen.getByRole("button", { name: /verify and sign in/i })).toBeDisabled();
+    expect(mockSignIn).toHaveBeenCalledTimes(1); // signup only; short code never submitted
+
+    mockSignIn.mockRejectedValueOnce(new Error("Could not verify code"));
+    fireEvent.change(screen.getByPlaceholderText("123456"), { target: { value: "999999" } });
+    fireEvent.click(screen.getByRole("button", { name: /verify and sign in/i }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/didn't match/));
+  });
+
+  it("resends the code and switches email", async () => {
+    mockSignIn.mockResolvedValue({ signingIn: false });
+    render(<AuthDialog onClose={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /create account/i }));
+    fillSignup();
+    fireEvent.click(screen.getByRole("button", { name: /^create free account$/i }));
+    await waitFor(() => expect(screen.getByText("Check your email")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /resend code/i }));
+    await waitFor(() => expect(screen.getByText(/fresh code/i)).toBeInTheDocument());
+    const [, resendForm] = mockSignIn.mock.calls[mockSignIn.mock.calls.length - 1];
+    expect(resendForm.get("flow")).toBe("signIn");
+
+    fireEvent.click(screen.getByRole("button", { name: /different email/i }));
+    expect(screen.getByText("Create your account")).toBeInTheDocument();
   });
 });
 

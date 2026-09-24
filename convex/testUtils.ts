@@ -35,3 +35,12 @@ export async function seedGroup(
     ...over,
   });
 }
+
+// Mailbox proof, as OTP verification would set it. Seeded users start
+// unverified (like a fresh signup); verify explicitly where a test needs
+// email-based linking (invite auto-link, claim, join-pending-link).
+export async function verifyUser(t: T, userId: Id<"users">) {
+  await t.run(async (ctx) => {
+    await ctx.db.patch(userId, { emailVerificationTime: Date.now() });
+  });
+}

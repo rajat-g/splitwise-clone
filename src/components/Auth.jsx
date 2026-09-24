@@ -27,6 +27,8 @@ function friendlyError(err) {
   if (/invalidsecret/i.test(m)) return "Incorrect email or password. Check both and try again.";
   if (/already exists|already in use|account exists/i.test(m))
     return "An account with this email already exists. Try signing in instead.";
+  if (/could not verify code|invalid code/i.test(m))
+    return "That code didn't match. Check the email and try again.";
   if (/invalid credentials|incorrect|not found|no user/i.test(m))
     return "Email or password didn't match. Check both and try again.";
   if (/at least 8/i.test(m)) return "Password must be at least 8 characters.";
@@ -37,11 +39,16 @@ function friendlyError(err) {
 export function AuthDialog({ onClose }) {
   const { signIn } = useAuthActions();
   const [mode, setMode] = useState("signIn");
+  const [step, setStep] = useState("credentials");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [codeNotice, setCodeNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  const signedIn = (result) => !!(result && typeof result === "object" && result.signingIn);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -65,14 +72,111 @@ export function AuthDialog({ onClose }) {
       form.set("password", password);
       form.set("flow", mode === "signUp" ? "signUp" : "signIn");
       if (mode === "signUp") form.set("name", name.trim());
-      await signIn("password", form);
-      onClose();
+      const result = await signIn("password", form);
+      // Verified session → done. Otherwise the backend emailed a one-time
+      // code instead of signing in — collect it below, never close early.
+      if (signedIn(result)) {
+        onClose();
+        return;
+      }
+      setCode("");
+      setCodeNotice(mode === "signUp" ? "Account created — verify it below to finish signing in." : "");
+      setStep("code");
     } catch (err) {
       setError(friendlyError(err));
     } finally {
       setBusy(false);
     }
   };
+
+  const submitCode = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (!/^\d{6}$/.test(code.trim())) {
+      setError("Enter the 6-digit code from the email.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const form = new FormData();
+      form.set("flow", "email-verification");
+      form.set("email", email.trim().toLowerCase());
+      form.set("code", code.trim());
+      const result = await signIn("password", form);
+      if (signedIn(result)) {
+        onClose();
+        return;
+      }
+      setError("That code didn't match. Check the email and try again.");
+    } catch (err) {
+      setError(friendlyError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resendCode = async () => {
+    setError("");
+    setCodeNotice("");
+    setBusy(true);
+    try {
+      // Re-running sign-in re-issues a fresh code (the account exists now).
+      const form = new FormData();
+      form.set("email", email.trim().toLowerCase());
+      form.set("password", password);
+      form.set("flow", "signIn");
+      const result = await signIn("password", form);
+      if (signedIn(result)) {
+        onClose();
+        return;
+      }
+      setCodeNotice("Sent a fresh code — check your inbox.");
+    } catch (err) {
+      setError(friendlyError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const backToCredentials = () => {
+    setError("");
+    setCodeNotice("");
+    setCode("");
+    setStep("credentials");
+  };
+
+  if (step === "code") {
+    return (
+      <Sheet
+        title="Check your email"
+        subtitle={`We sent a 6-digit code to ${email.trim().toLowerCase()}. It expires in 15 minutes — enter it to prove this address is yours.`}
+        onClose={onClose}
+      >
+        <form onSubmit={submitCode} className="space-y-3.5">
+          <Field label="Verification code">
+            <TextInput placeholder="123456" value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              autoComplete="one-time-code" inputMode="numeric" maxLength={6} autoFocus />
+          </Field>
+          {codeNotice && <p className="rounded-xl bg-teal-700/10 px-3.5 py-2.5 text-sm font-medium text-teal-800 dark:bg-teal-400/10 dark:text-teal-200">{codeNotice}</p>}
+          {error && <Alert>{error}</Alert>}
+          <Button type="submit" disabled={busy || code.trim().length !== 6} className="w-full !min-h-[3rem]">
+            {busy ? "Verifying…" : "Verify and sign in"}
+          </Button>
+          <p className="flex items-center justify-center gap-4 text-center text-sm text-slate-500 dark:text-slate-400">
+            <button type="button" onClick={resendCode} disabled={busy}
+              className="font-semibold text-teal-700 hover:underline disabled:opacity-50 cursor-pointer dark:text-teal-300">
+              Resend code
+            </button>
+            <button type="button" onClick={backToCredentials} disabled={busy}
+              className="font-semibold text-teal-700 hover:underline disabled:opacity-50 cursor-pointer dark:text-teal-300">
+              Use a different email
+            </button>
+          </p>
+        </form>
+      </Sheet>
+    );
+  }
 
   return (
     <Sheet
