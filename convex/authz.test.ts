@@ -80,8 +80,8 @@ describe("members can transact but not rotate", () => {
     const { alice, mallory, t, g } = base;
     // Alice invites Mallory (account exists → linked immediately as a member).
     await alice.mutation(api.members.add, { publicId: g.publicId, email: "mallory@x.co" });
-    const members = await t.query(api.members.list, { publicId: g.publicId });
-    const malloryRow = members.find((m) => m.email === "mallory@x.co")!;
+    const members = await alice.query(api.members.list, { publicId: g.publicId });
+    const malloryRow = members.find((m) => "email" in m && m.email === "mallory@x.co")!;
     return { ...base, malloryRow };
   }
 
@@ -95,14 +95,14 @@ describe("members can transact but not rotate", () => {
     expect(_id).toBeTruthy();
 
     await mallory.mutation(api.members.add, { publicId: g.publicId, email: "newbie@x.co", name: "New" });
-    let members = await t.query(api.members.list, { publicId: g.publicId });
-    const newbie = members.find((m) => m.email === "newbie@x.co")!;
+    let members = await mallory.query(api.members.list, { publicId: g.publicId });
+    const newbie = members.find((m) => "email" in m && m.email === "newbie@x.co")!;
     await mallory.mutation(api.members.rename, {
       publicId: g.publicId, memberId: newbie._id, name: "Newcomer",
     });
     await mallory.mutation(api.members.remove, { publicId: g.publicId, memberId: newbie._id });
-    members = await t.query(api.members.list, { publicId: g.publicId });
-    expect(members.find((m) => m.email === "newbie@x.co")).toMatchObject({ status: "left" });
+    members = await mallory.query(api.members.list, { publicId: g.publicId });
+    expect(members.find((m) => "email" in m && m.email === "newbie@x.co")).toMatchObject({ status: "left" });
     void alice;
     void creator;
   });
@@ -124,13 +124,13 @@ describe("members.join", () => {
     const { t, mallory, g } = await setupOutsider();
     const first = await mallory.mutation(api.members.join, { publicId: g.publicId });
     expect(first.name).toBe("Mallory");
-    const members = await t.query(api.members.list, { publicId: g.publicId });
+    const members = await mallory.query(api.members.list, { publicId: g.publicId });
     expect(members.find((m) => m.name === "Mallory")).toMatchObject({ email: "mallory@x.co" });
     const second = await mallory.mutation(api.members.join, { publicId: g.publicId });
     expect(second._id).toEqual(first._id);
     // A joined outsider can now write.
-    const rows = await t.query(api.members.list, { publicId: g.publicId });
-    const row = rows.find((m) => m.email === "mallory@x.co")!;
+    const rows = await mallory.query(api.members.list, { publicId: g.publicId });
+    const row = rows.find((m) => "email" in m && m.email === "mallory@x.co")!;
     const { _id } = await mallory.mutation(api.expenses.add, {
       publicId: g.publicId, description: "Hi", amountCents: 100,
       paidBy: row._id, splits: [{ memberId: row._id, amountCents: 100 }],
@@ -147,8 +147,8 @@ describe("members.join", () => {
     const { authed: ghost } = await seedUser(t, { name: "Ghost Real", email: "ghost@x.co" });
     const res = await ghost.mutation(api.members.join, { publicId: g.publicId });
     expect(res.name).toBe("Ghost Real");
-    const members = await t.query(api.members.list, { publicId: g.publicId });
-    expect(members.filter((m) => m.email === "ghost@x.co")).toHaveLength(1);
+    const members = await ghost.query(api.members.list, { publicId: g.publicId });
+    expect(members.filter((m) => "email" in m && m.email === "ghost@x.co")).toHaveLength(1);
   });
 });
 
@@ -199,9 +199,9 @@ describe("soft-deleted members keep history readable", () => {
     const { authed: alice } = await seedUser(t, { name: "Alice", email: "alice@x.co" });
     const g = await seedGroup(alice, { creatorName: "Alice" });
     await alice.mutation(api.members.add, { publicId: g.publicId, email: "zed@x.co", name: "Zed" });
-    const members = await t.query(api.members.list, { publicId: g.publicId });
+    const members = await alice.query(api.members.list, { publicId: g.publicId });
     const creator = members.find((m) => m.name === "Alice")!;
-    const zed = members.find((m) => m.email === "zed@x.co")!;
+    const zed = members.find((m) => "email" in m && m.email === "zed@x.co")!;
     // Zed participates, then settles to zero and leaves.
     await alice.mutation(api.expenses.add, {
       publicId: g.publicId, description: "Dinner", amountCents: 2000,
@@ -281,7 +281,7 @@ describe("soft-deleted members keep history readable", () => {
       publicId: g.publicId, email: "zed@x.co", name: "Zeddy",
     });
     expect(again._id).toEqual(zed._id);
-    let members = await t.query(api.members.list, { publicId: g.publicId });
+    let members = await alice.query(api.members.list, { publicId: g.publicId });
     expect(members.find((m) => m._id === zed._id)).toMatchObject({ status: "active", name: "Zeddy" });
 
     // Leave again, then rejoin via join (no temp name → keeps row name).
@@ -289,8 +289,54 @@ describe("soft-deleted members keep history readable", () => {
     const { authed: zedAuth } = await seedUser(t, { name: "Zeddy", email: "zed@x.co" });
     const rejoined = await zedAuth.mutation(api.members.join, { publicId: g.publicId });
     expect(rejoined._id).toEqual(zed._id);
-    members = await t.query(api.members.list, { publicId: g.publicId });
-    expect(members.filter((m) => m.email === "zed@x.co")).toHaveLength(1);
+    members = await zedAuth.query(api.members.list, { publicId: g.publicId });
+    expect(members.filter((m) => "email" in m && m.email === "zed@x.co")).toHaveLength(1);
     expect(members.find((m) => m._id === zed._id)?.status).toBe("active");
+  });
+});
+
+describe("member list redaction", () => {
+  it("strips emails, userIds and deviceIds for guests", async () => {
+    const { t, g } = await setupOutsider();
+    const rows = await t.query(api.members.list, { publicId: g.publicId });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toEqual({
+      _id: expect.anything(),
+      _creationTime: expect.any(Number),
+      groupId: expect.anything(),
+      name: "Alice",
+      createdAt: expect.any(Number),
+    });
+    expect(JSON.stringify(rows)).not.toMatch(/alice@x\.co|deviceId|userId/);
+  });
+
+  it("hides other members' emails from signed-in outsiders", async () => {
+    const { t, mallory, g } = await setupOutsider();
+    void t;
+    const rows = await mallory.query(api.members.list, { publicId: g.publicId });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).not.toHaveProperty("email");
+    expect(rows[0]).not.toHaveProperty("userId");
+  });
+
+  it("unredacts only the outsider's own pending invite row", async () => {
+    const { alice, t, g } = await setupOutsider();
+    await alice.mutation(api.members.add, { publicId: g.publicId, email: "mallory@x.co" });
+    const { authed: mallory } = await seedUser(t, { name: "Mallory", email: "mallory@x.co" });
+    const rows = await mallory.query(api.members.list, { publicId: g.publicId });
+    expect(rows).toHaveLength(2);
+    const own = rows.find((m) => "email" in m && m.email === "mallory@x.co");
+    expect(own).toBeTruthy();
+    expect(rows.filter((m) => !("email" in m))).toHaveLength(1);
+  });
+
+  it("returns full rows minus deviceId to members", async () => {
+    const { alice, t, g } = await setupOutsider();
+    await alice.mutation(api.members.add, { publicId: g.publicId, email: "mallory@x.co", name: "Mal" });
+    const rows = await alice.query(api.members.list, { publicId: g.publicId });
+    expect(rows).toHaveLength(2);
+    for (const m of rows) expect(m).not.toHaveProperty("deviceId");
+    expect(rows.find((m) => "email" in m && m.email === "mallory@x.co")).toBeTruthy();
+    void t;
   });
 });

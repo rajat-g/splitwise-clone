@@ -133,6 +133,30 @@ describe("GroupPage loading and missing states", () => {
 });
 
 describe("GroupPage as guest", () => {
+  it("renders redacted member rows for guests without emails", () => {
+    const redacted = members.map(({ email, userId, ...rest }) => rest);
+    mockUseQuery.mockImplementation((ref) => {
+      switch (fname(ref)) {
+        case "groups:getByPublicId": return group;
+        case "members:list": return redacted;
+        case "expenses:list": return expenses;
+        case "expenses:activity": return activity;
+        case "users:viewer": return null;
+        default: return undefined;
+      }
+    });
+    renderPage();
+    fireEvent.click(tab(5));
+    expect(screen.getByText("Ada")).toBeInTheDocument();
+    expect(screen.queryByText("ada@x.co")).not.toBeInTheDocument();
+    expect(screen.queryByText("invited")).not.toBeInTheDocument();
+    expect(screen.queryByText("joined")).not.toBeInTheDocument();
+    fireEvent.click(tab(1));
+    expect(screen.getByText(/gets \$30\.00/)).toBeInTheDocument();
+    fireEvent.click(tab(5));
+    expect(screen.getByText(/sign in to add members/i)).toBeInTheDocument();
+  });
+
   it("renders header, expenses and guest banner", () => {
     renderPage();
     expect(screen.getByRole("heading", { name: "Goa" })).toBeInTheDocument();
@@ -213,6 +237,28 @@ describe("GroupPage members as a signed-in user", () => {
     await waitFor(() => expect(mutations.claimInvite).toHaveBeenCalledWith({ publicId: "abc" }));
     fireEvent.click(tab(5));
     expect(screen.getByText("you")).toBeInTheDocument();
+  });
+
+  it("resolves an invitee's own row from a redacted list", async () => {
+    const redacted = members.map((m) =>
+      m.email === "bo@x.co" ? m : (({ email, userId, ...rest }) => rest)(m)
+    );
+    mockUseQuery.mockImplementation((ref) => {
+      switch (fname(ref)) {
+        case "groups:getByPublicId": return group;
+        case "members:list": return redacted;
+        case "expenses:list": return expenses;
+        case "expenses:activity": return activity;
+        case "users:viewer": return { _id: "u2", name: "Bo", email: "bo@x.co" };
+        default: return undefined;
+      }
+    });
+    renderPage();
+    await waitFor(() => expect(mutations.claimInvite).toHaveBeenCalledWith({ publicId: "abc" }));
+    fireEvent.click(tab(5));
+    expect(screen.getByText("you")).toBeInTheDocument();
+    expect(screen.getAllByText("bo@x.co").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("ada@x.co")).not.toBeInTheDocument();
   });
 
   it("invites by email with validation", async () => {

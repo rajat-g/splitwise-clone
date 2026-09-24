@@ -67,10 +67,48 @@ function profileNameOf(user: any, fallbackEmail: string) {
 
 export const list = query({
   args: { publicId: v.string() },
+  // Explicit DTO: email/userId are present only for members (or own row) —
+  // the optional markers ARE the redaction contract, enforced below.
+  returns: v.array(v.object({
+    _id: v.id("members"),
+    _creationTime: v.number(),
+    groupId: v.id("groups"),
+    name: v.string(),
+    email: v.optional(v.string()),
+    status: v.optional(v.string()),
+    userId: v.optional(v.id("users")),
+    createdAt: v.number(),
+  })),
   handler: async (ctx, args) => {
     const g = await ctx.db.query("groups").withIndex("by_publicId", (q) => q.eq("publicId", args.publicId)).first();
     if (!g) return [];
-    return await ctx.db.query("members").withIndex("by_group", (q) => q.eq("groupId", g._id)).collect();
+    const rows = await ctx.db.query("members").withIndex("by_group", (q) => q.eq("groupId", g._id)).collect();
+    // Privacy: member emails are invite-scoped PII, not public directory
+    // data. Guests (and signed-in outsiders) receive a sanitized DTO —
+    // never trust the frontend to hide what the backend already returned.
+    // Full rows go only to linked group members; an outsider additionally
+    // sees the email on rows matching their OWN address so pending invites
+    // still resolve, claim, and show correctly for them. deviceId is
+    // write-only and stripped for everyone.
+    const userId = await getAuthUserId(ctx);
+    let viewerEmail = "";
+    let isMember = false;
+    if (userId) {
+      const user = await ctx.db.get(userId);
+      viewerEmail = (((user as { email?: unknown } | null)?.email as string | undefined) ?? "").trim().toLowerCase();
+      isMember = rows.some((m) => (m as { userId?: unknown }).userId && String((m as { userId?: unknown }).userId) === String(userId));
+    }
+    return rows.map((m) => {
+      const { deviceId: _device, ...rest } = m;
+      void _device;
+      const ownEmail = !!viewerEmail && typeof rest.email === "string"
+        && rest.email.trim().toLowerCase() === viewerEmail;
+      if (isMember || ownEmail) return rest;
+      const { email: _email, userId: _uid, ...pub } = rest;
+      void _email;
+      void _uid;
+      return pub;
+    });
   },
 });
 

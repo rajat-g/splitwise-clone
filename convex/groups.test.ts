@@ -19,7 +19,7 @@ describe("groups.create", () => {
     expect(g.publicId).toHaveLength(21);
     expect(g.inviteCode).toHaveLength(10);
 
-    const members = await t.query(api.members.list, { publicId: g.publicId });
+    const members = await authed.query(api.members.list, { publicId: g.publicId });
     expect(members).toHaveLength(1);
     expect(members[0]).toMatchObject({
       name: "Ada",

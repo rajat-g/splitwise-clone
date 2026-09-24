@@ -33,17 +33,17 @@ describe("members.add", () => {
       name: "Bo",
     });
     expect(res.name).toBe("Bo");
-    const members = await t.query(api.members.list, { publicId: g.publicId });
-    const bo = members.find((m) => m.email === "bo@example.com")!;
+    const members = await authed.query(api.members.list, { publicId: g.publicId });
+    const bo = members.find((m) => "email" in m && m.email === "bo@example.com")!;
     expect(bo).toMatchObject({ name: "Bo", email: "bo@example.com" });
-    expect(bo.userId).toBeUndefined();
+    expect("userId" in bo ? bo.userId : undefined).toBeUndefined();
   });
 
   it("falls back to the email as display name without a temp name", async () => {
-    const { authed, t, g } = await setup();
+    const { authed, g } = await setup();
     await authed.mutation(api.members.add, { publicId: g.publicId, email: "RAHUL@EXAMPLE.COM" });
-    const members = await t.query(api.members.list, { publicId: g.publicId });
-    expect(members.find((m) => m.email === "rahul@example.com")?.name).toBe("rahul@example.com");
+    const members = await authed.query(api.members.list, { publicId: g.publicId });
+    expect(members.find((m) => "email" in m && m.email === "rahul@example.com")?.name).toBe("rahul@example.com");
   });
 
   it("links and names instantly when the email already has an account", async () => {
@@ -55,8 +55,8 @@ describe("members.add", () => {
       name: "Sofi-temp",
     });
     expect(res.name).toBe("Sofia Real");
-    const members = await t.query(api.members.list, { publicId: g.publicId });
-    expect(members.find((m) => m.email === "sofia@example.com")).toMatchObject({ userId });
+    const members = await authed.query(api.members.list, { publicId: g.publicId });
+    expect(members.find((m) => "email" in m && m.email === "sofia@example.com")).toMatchObject({ userId });
   });
 
   it("is idempotent for duplicate emails and caps group size messaging", async () => {
@@ -107,8 +107,8 @@ describe("members.claim", () => {
     const rahul = t.withIdentity({ subject: rahulId });
     const { claimed } = await rahul.mutation(api.members.claim, { publicId: g.publicId });
     expect(claimed).toBeGreaterThanOrEqual(1);
-    const members = await t.query(api.members.list, { publicId: g.publicId });
-    expect(members.find((m) => m.email === "rahul@example.com")).toMatchObject({
+    const members = await rahul.query(api.members.list, { publicId: g.publicId });
+    expect(members.find((m) => "email" in m && m.email === "rahul@example.com")).toMatchObject({
       name: "Rahul Real",
       userId: rahulId,
     });
@@ -118,11 +118,12 @@ describe("members.claim", () => {
     const { authed, t, g } = await setup();
     await authed.mutation(api.members.add, { publicId: g.publicId, email: "bo@example.com", name: "Bobby" });
     const { userId: boId } = await seedUser(t, { name: "Bo Real", email: "bo@example.com" });
-    await t.withIdentity({ subject: boId }).mutation(api.members.claim, { publicId: g.publicId });
-    const members = await t.query(api.members.list, { publicId: g.publicId });
-    const bo = members.find((m) => m.email === "bo@example.com");
+    const boAuth = t.withIdentity({ subject: boId });
+    await boAuth.mutation(api.members.claim, { publicId: g.publicId });
+    const members = await boAuth.query(api.members.list, { publicId: g.publicId });
+    const bo = members.find((m) => "email" in m && m.email === "bo@example.com");
     expect(bo?.name).toBe("Bobby");
-    expect(bo?.userId).toEqual(boId);
+    expect(bo && "userId" in bo ? bo.userId : undefined).toEqual(boId);
   });
 
   it("is a no-op without a matching invite and rejects guests", async () => {
@@ -146,7 +147,8 @@ describe("members.claim", () => {
       .withIdentity({ subject: userId })
       .mutation(api.members.claim, { publicId: g.publicId });
     expect(claimed).toBe(1);
-    const members = await t.query(api.members.list, { publicId: g.publicId });
+    const boAuth = t.withIdentity({ subject: userId });
+    const members = await boAuth.query(api.members.list, { publicId: g.publicId });
     expect(members.find((m) => m._id === _id)?.name).toBe("Bo Real");
   });
 
@@ -154,9 +156,9 @@ describe("members.claim", () => {
     const { authed, t, g } = await setup();
     const { userId } = await seedUser(t, { name: "   ", email: "pl@example.com" });
     await authed.mutation(api.members.add, { publicId: g.publicId, email: "pl@example.com" });
-    const members = await t.query(api.members.list, { publicId: g.publicId });
+    const members = await authed.query(api.members.list, { publicId: g.publicId });
     // findUserByEmail links instantly; blank profile name falls back to prefix.
-    expect(members.find((m) => m.email === "pl@example.com")).toMatchObject({
+    expect(members.find((m) => "email" in m && m.email === "pl@example.com")).toMatchObject({
       name: "pl",
       userId,
     });
@@ -182,8 +184,8 @@ describe("members.rename", () => {
     const { authed, t, g } = await setup();
     await authed.mutation(api.members.add, { publicId: g.publicId, email: "a@x.co", name: "Sam" });
     await authed.mutation(api.members.add, { publicId: g.publicId, email: "b@x.co", name: "Samuel" });
-    const members = await t.query(api.members.list, { publicId: g.publicId });
-    const samuel = members.find((m) => m.email === "b@x.co")!;
+    const members = await authed.query(api.members.list, { publicId: g.publicId });
+    const samuel = members.find((m) => "email" in m && m.email === "b@x.co")!;
     const res = await authed.mutation(api.members.rename, {
       publicId: g.publicId, memberId: samuel._id, name: "Sam",
     });
@@ -207,9 +209,9 @@ describe("members.remove", () => {
   it("removes zero-balance members and blocks non-zero ones", async () => {
     const { authed, t, g, userId } = await setup();
     await authed.mutation(api.members.add, { publicId: g.publicId, email: "bo@example.com", name: "Bo" });
-    let members = await t.query(api.members.list, { publicId: g.publicId });
-    const bo = members.find((m) => m.email === "bo@example.com")!;
-    const creator = members.find((m) => String(m.userId) === String(userId))!;
+    let members = await authed.query(api.members.list, { publicId: g.publicId });
+    const bo = members.find((m) => "email" in m && m.email === "bo@example.com")!;
+    const creator = members.find((m) => "userId" in m && String(m.userId) === String(userId))!;
 
     await authed.mutation(api.expenses.add, {
       publicId: g.publicId,
@@ -236,9 +238,9 @@ describe("members.remove", () => {
       isSettlement: true,
     });
     await authed.mutation(api.members.remove, { publicId: g.publicId, memberId: bo._id });
-    members = await t.query(api.members.list, { publicId: g.publicId });
+    members = await authed.query(api.members.list, { publicId: g.publicId });
     // Soft delete: the row stays (history keeps resolving) with status left.
-    expect(members.find((m) => m.email === "bo@example.com")).toMatchObject({ status: "left" });
+    expect(members.find((m) => "email" in m && m.email === "bo@example.com")).toMatchObject({ status: "left" });
     await expect(authed.mutation(api.members.remove, { publicId: g.publicId, memberId: bo._id }))
       .rejects.toThrow(/already left/i);
   });

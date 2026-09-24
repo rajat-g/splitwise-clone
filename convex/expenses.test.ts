@@ -19,8 +19,8 @@ async function setup() {
     authed.mutation(api.members.add, { publicId: g.publicId, email, ...(name ? { name } : {}) });
   const a = await addMember("a@x.co", "Ann");
   const b = await addMember("b@x.co", "Bo");
-  const members = await t.query(api.members.list, { publicId: g.publicId });
-  const creator = members.find((m) => String(m.userId) === String(userId))!;
+  const members = await authed.query(api.members.list, { publicId: g.publicId });
+  const creator = members.find((m) => "userId" in m && String(m.userId) === String(userId))!;
   const ann = members.find((m) => m._id === a._id)!;
   const bo = members.find((m) => m._id === b._id)!;
   return { t, authed, g, creator, ann, bo };

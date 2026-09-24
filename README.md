@@ -60,6 +60,7 @@ Account behavior:
 - Sign in/up from the header button. Sign-up fields: name, email, password (min 8 chars).
 - Groups get `ownerUserId` and appear under **My groups** on Home, on any device.
 - Guests opening an invite link can view balances, expenses, members, activity — write controls are hidden and the backend rejects writes ("Sign in to make changes." for guests, "You are not a member of this group." for signed-in outsiders). Signed-in outsiders see a Join prompt.
+- Trust boundary (read before production): account emails are **unverified** — signup takes any email string, first-come-first-served, with no mailbox proof. Email invites link by matching that string, so treat member email subtitles as labels, not verified identity. A squatter who registers someone else's address first can impersonate them on invite and lock them out of that address. Mitigations, in order of strength: (1) email verification via OTP on signup before email confers membership, (2) per-invite single-use claim tokens relayed out-of-band instead of email matching. Display names were never trustworthy (free-form at signup).
 - Leaving is a soft delete (`status: "left"`): the row stays so historical expenses, balances, and reports keep resolving names. Left members are hidden from new splits/payers (server-enforced), settle to zero before leaving, and rejoin via Join or re-invite.
 - No email verification or password reset wired. Adding reset needs an email sender (e.g. Resend free tier) — ask if you want it.
 
