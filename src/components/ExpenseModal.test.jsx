@@ -105,4 +105,57 @@ describe("ExpenseModal", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(/who paid/i);
     expect(onSave).not.toHaveBeenCalled();
   });
+
+  it("preserves an exact split when only renaming on edit", () => {
+    const onSave = vi.fn();
+    render(
+      <ExpenseModal members={members} currency="$" onClose={() => {}} onSave={onSave}
+        initial={{
+          description: "Dinner", amount: 1000, paidBy: "m1", date: "2026-09-20",
+          category: "food", splitMode: "exact", splits: { m1: 700, m2: 300 },
+        }} />
+    );
+    expect(screen.getByRole("button", { name: "Exact" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.change(screen.getByPlaceholderText(/dinner/i), { target: { value: "Dinner at Taj" } });
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      description: "Dinner at Taj",
+      splitMode: "exact",
+      splits: { m1: 700, m2: 300 },
+    }));
+  });
+
+  it("restores equal mode for even splits without a stored mode", () => {
+    const onSave = vi.fn();
+    render(
+      <ExpenseModal members={members} currency="$" onClose={() => {}} onSave={onSave}
+        initial={{
+          description: "Dinner", amount: 100, paidBy: "m1", date: "2026-09-20",
+          splits: { m1: 50, m2: 50 },
+        }} />
+    );
+    expect(screen.getByRole("button", { name: "Equal" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      splitMode: "equal",
+      splits: { m1: 50, m2: 50 },
+    }));
+  });
+
+  it("opens legacy uneven splits as exact so values round-trip", () => {
+    const onSave = vi.fn();
+    render(
+      <ExpenseModal members={members} currency="$" onClose={() => {}} onSave={onSave}
+        initial={{
+          description: "Dinner", amount: 100, paidBy: "m1", date: "2026-09-20",
+          splitMode: "bogus", splits: { m1: 70, m2: 30 },
+        }} />
+    );
+    expect(screen.getByRole("button", { name: "Exact" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      splitMode: "exact",
+      splits: { m1: 70, m2: 30 },
+    }));
+  });
 });
