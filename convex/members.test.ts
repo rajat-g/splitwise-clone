@@ -39,11 +39,11 @@ describe("members.add", () => {
     expect("userId" in bo ? bo.userId : undefined).toBeUndefined();
   });
 
-  it("falls back to the email as display name without a temp name", async () => {
+  it("falls back to the email prefix (never the full address) without a temp name", async () => {
     const { authed, g } = await setup();
     await authed.mutation(api.members.add, { publicId: g.publicId, email: "RAHUL@EXAMPLE.COM" });
     const members = await authed.query(api.members.list, { publicId: g.publicId });
-    expect(members.find((m) => "email" in m && m.email === "rahul@example.com")?.name).toBe("rahul@example.com");
+    expect(members.find((m) => "email" in m && m.email === "rahul@example.com")?.name).toBe("rahul");
   });
 
   it("links instantly when the email has a VERIFIED account, else stays pending", async () => {

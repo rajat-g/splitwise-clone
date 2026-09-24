@@ -168,7 +168,12 @@ export const add = mutation({
       const linkedUser = await findUserByEmail(ctx, email);
       const linkedUserId =
         linkedUser && userEmailVerified(linkedUser) ? (linkedUser._id as Id<"users">) : null;
-      const display = linkedUserId && linkedUser ? profileNameOf(linkedUser, email) : tempName || email;
+      // No temp name? Fall back to the email prefix ("priya"), never the
+      // full address — the row subtitle already shows the email, and claim
+      // upgrades prefix displays to the real name on signup.
+      const display = linkedUserId && linkedUser
+        ? profileNameOf(linkedUser, email)
+        : tempName || email.split("@")[0] || email;
 
       const now = Date.now();
       const doc: Record<string, unknown> = {
