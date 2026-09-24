@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
     "icons": "node scripts/generate-icons.mjs",
+    "wipe": "node scripts/wipe.mjs",
     "preview": "vite preview",
     "setup:auth": "node scripts/setup-auth.mjs"
   },
