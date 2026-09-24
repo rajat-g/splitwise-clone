@@ -4,9 +4,16 @@ import { Sheet } from "./Sheet";
 
 const mid = (m) => String(m._id ?? m.id);
 const displayOf = (m) => m?.name || String(m?.email ?? "").trim() || "Unknown";
-const optionLabel = (m) => {
+// Emails stay out of the list unless two members share a display name —
+// then only the colliding rows show theirs to stay distinguishable.
+const optionLabel = (m, all) => {
+  const name = displayOf(m);
   const email = String(m?.email ?? "").trim().toLowerCase();
-  return email && displayOf(m) !== email ? `${displayOf(m)} (${email})` : displayOf(m);
+  if (!email || name.toLowerCase() === email) return name;
+  const clash = (all || []).some(
+    (o) => o !== m && String(o?.name || "").trim().toLowerCase() === name.toLowerCase()
+  );
+  return clash ? `${name} (${email})` : name;
 };
 
 export default function SettleModal({ members, balances, currency, initial, onClose, onSave, saving }) {
@@ -30,12 +37,12 @@ export default function SettleModal({ members, balances, currency, initial, onCl
         <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
           <Field label="Paid by">
             <Select value={from} onChange={(e) => setFrom(e.target.value)}>
-              {members.map((m) => <option key={mid(m)} value={mid(m)}>{optionLabel(m)}</option>)}
+              {members.map((m) => <option key={mid(m)} value={mid(m)}>{optionLabel(m, members)}</option>)}
             </Select>
           </Field>
           <Field label="Received by">
             <Select value={to} onChange={(e) => setTo(e.target.value)}>
-              {members.map((m) => <option key={mid(m)} value={mid(m)}>{optionLabel(m)}</option>)}
+              {members.map((m) => <option key={mid(m)} value={mid(m)}>{optionLabel(m, members)}</option>)}
             </Select>
           </Field>
         </div>

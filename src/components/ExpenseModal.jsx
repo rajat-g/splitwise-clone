@@ -6,9 +6,16 @@ import { Sheet } from "./Sheet";
 
 const mid = (m) => String(m._id ?? m.id);
 const displayOf = (m) => m?.name || String(m?.email ?? "").trim() || "Unknown";
-const optionLabel = (m) => {
+// Emails stay out of the list unless two members share a display name —
+// then only the colliding rows show theirs to stay distinguishable.
+const optionLabel = (m, all) => {
+  const name = displayOf(m);
   const email = String(m?.email ?? "").trim().toLowerCase();
-  return email && displayOf(m) !== email ? `${displayOf(m)} (${email})` : displayOf(m);
+  if (!email || name.toLowerCase() === email) return name;
+  const clash = (all || []).some(
+    (o) => o !== m && String(o?.name || "").trim().toLowerCase() === name.toLowerCase()
+  );
+  return clash ? `${name} (${email})` : name;
 };
 const MODES = [["equal", "Equal"], ["exact", "Exact"], ["percent", "%"], ["shares", "Shares"]];
 
@@ -68,7 +75,7 @@ export default function ExpenseModal({ members, currency, initial, onClose, onSa
           </Field>
           <Field label="Paid by">
             <Select value={paidBy} onChange={(e) => setPaidBy(e.target.value)}>
-              {members.map((m) => <option key={mid(m)} value={mid(m)}>{optionLabel(m)}</option>)}
+              {members.map((m) => <option key={mid(m)} value={mid(m)}>{optionLabel(m, members)}</option>)}
               {!members.some((m) => mid(m) === String(paidBy)) && initial?.paidByName && (
                 <option value={paidBy} disabled>{initial.paidByName} (left)</option>
               )}
@@ -114,9 +121,9 @@ export default function ExpenseModal({ members, currency, initial, onClose, onSa
                   <input type="checkbox" checked={on} onChange={() => toggle(id)}
                     className="h-5 w-5 shrink-0 cursor-pointer accent-teal-700 dark:accent-teal-400" />
                   <Avatar name={m.name} className="h-7 w-7 text-[10px]" />
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800 dark:text-slate-100">{optionLabel(m)}</span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800 dark:text-slate-100">{optionLabel(m, members)}</span>
                   {on && mode !== "equal" && (
-                    <input type="number" min="0" step="0.01" inputMode="decimal" aria-label={`${optionLabel(m)} ${mode === "percent" ? "percent" : mode === "shares" ? "shares" : "amount"}`}
+                    <input type="number" min="0" step="0.01" inputMode="decimal" aria-label={`${optionLabel(m, members)} ${mode === "percent" ? "percent" : mode === "shares" ? "shares" : "amount"}`}
                       placeholder={mode === "percent" ? "%" : mode === "shares" ? "shares" : "0.00"}
                       className="tnum w-24 shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm text-slate-900 focus:border-teal-600 focus:outline-none dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-100"
                       value={values[id] ?? ""}

@@ -47,9 +47,9 @@ describe("ExpenseModal", () => {
     render(<ExpenseModal members={members} currency="$" onClose={() => {}} onSave={onSave} />);
     fillValid();
     fireEvent.click(screen.getByRole("button", { name: "Exact" }));
-    fireEvent.change(screen.getByLabelText("Ann (a@x.co) amount"), { target: { value: "60" } });
-    fireEvent.click(screen.getByLabelText("Ann (a@x.co) amount"));
-    fireEvent.change(screen.getByLabelText("Bo (b@x.co) amount"), { target: { value: "30" } });
+    fireEvent.change(screen.getByLabelText("Ann amount"), { target: { value: "60" } });
+    fireEvent.click(screen.getByLabelText("Ann amount"));
+    fireEvent.change(screen.getByLabelText("Bo amount"), { target: { value: "30" } });
     fireEvent.click(screen.getByRole("button", { name: /add expense/i }));
     expect(screen.getByRole("alert")).toHaveTextContent(/must equal/);
     expect(onSave).not.toHaveBeenCalled();
@@ -171,5 +171,17 @@ describe("ExpenseModal", () => {
     expect(screen.getByText("Dan (left)")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ paidBy: "m9" }));
+  });
+
+  it("shows plain names, disambiguating only colliding display names", () => {
+    const dupes = [
+      { _id: "s1", name: "Sam", email: "sam-one@x.co" },
+      { _id: "s2", name: "sam", email: "sam-two@x.co" },
+      { _id: "s3", name: "Alex", email: "alex@x.co" },
+    ];
+    render(<ExpenseModal members={dupes} currency="$" onClose={() => {}} onSave={() => {}} />);
+    expect(screen.getAllByText("Sam (sam-one@x.co)").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("sam (sam-two@x.co)").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText(/alex@x\.co/)).not.toBeInTheDocument();
   });
 });
