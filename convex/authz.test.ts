@@ -77,7 +77,7 @@ describe("outsiders cannot write", () => {
 describe("members can transact but not rotate", () => {
   async function setupMember() {
     const base = await setupOutsider();
-    const { alice, mallory, t, g } = base;
+    const { alice, g } = base;
     // Alice invites Mallory (account exists → linked immediately as a member).
     await alice.mutation(api.members.add, { publicId: g.publicId, email: "mallory@x.co" });
     const members = await alice.query(api.members.list, { publicId: g.publicId });
@@ -86,7 +86,7 @@ describe("members can transact but not rotate", () => {
   }
 
   it("member adds expenses, invites, renames and removes", async () => {
-    const { alice, mallory, t, g, creator, malloryRow } = await setupMember();
+    const { alice, mallory, g, creator, malloryRow } = await setupMember();
     const { _id } = await mallory.mutation(api.expenses.add, {
       publicId: g.publicId, description: "Lunch", amountCents: 200,
       paidBy: malloryRow._id, splits: [{ memberId: malloryRow._id, amountCents: 200 }],
@@ -121,7 +121,7 @@ describe("members.join", () => {
   });
 
   it("creates a linked row, idempotently", async () => {
-    const { t, mallory, g } = await setupOutsider();
+    const { mallory, g } = await setupOutsider();
     const first = await mallory.mutation(api.members.join, { publicId: g.publicId });
     expect(first.name).toBe("Mallory");
     const members = await mallory.query(api.members.list, { publicId: g.publicId });

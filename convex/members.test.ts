@@ -26,7 +26,7 @@ describe("members.list", () => {
 
 describe("members.add", () => {
   it("invites by email with a temp name", async () => {
-    const { authed, g, t } = await setup();
+    const { authed, g } = await setup();
     const res = await authed.mutation(api.members.add, {
       publicId: g.publicId,
       email: "Bo@Example.com",
@@ -181,7 +181,7 @@ describe("members.rename", () => {
   });
 
   it("allows the same display name across distinct email invites", async () => {
-    const { authed, t, g } = await setup();
+    const { authed, g } = await setup();
     await authed.mutation(api.members.add, { publicId: g.publicId, email: "a@x.co", name: "Sam" });
     await authed.mutation(api.members.add, { publicId: g.publicId, email: "b@x.co", name: "Samuel" });
     const members = await authed.query(api.members.list, { publicId: g.publicId });
@@ -207,7 +207,7 @@ describe("members.rename", () => {
 
 describe("members.remove", () => {
   it("removes zero-balance members and blocks non-zero ones", async () => {
-    const { authed, t, g, userId } = await setup();
+    const { authed, g, userId } = await setup();
     await authed.mutation(api.members.add, { publicId: g.publicId, email: "bo@example.com", name: "Bo" });
     let members = await authed.query(api.members.list, { publicId: g.publicId });
     const bo = members.find((m) => "email" in m && m.email === "bo@example.com")!;

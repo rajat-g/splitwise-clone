@@ -134,7 +134,11 @@ describe("GroupPage loading and missing states", () => {
 
 describe("GroupPage as guest", () => {
   it("renders redacted member rows for guests without emails", () => {
-    const redacted = members.map(({ email, userId, ...rest }) => rest);
+    const redacted = members.map(({ email: _email, userId: _userId, ...rest }) => {
+      void _email;
+      void _userId;
+      return rest;
+    });
     mockUseQuery.mockImplementation((ref) => {
       switch (fname(ref)) {
         case "groups:getByPublicId": return group;
@@ -241,7 +245,7 @@ describe("GroupPage members as a signed-in user", () => {
 
   it("resolves an invitee's own row from a redacted list", async () => {
     const redacted = members.map((m) =>
-      m.email === "bo@x.co" ? m : (({ email, userId, ...rest }) => rest)(m)
+      m.email === "bo@x.co" ? m : (({ email: _e, userId: _u, ...rest }) => rest)(m)
     );
     mockUseQuery.mockImplementation((ref) => {
       switch (fname(ref)) {
