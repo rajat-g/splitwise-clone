@@ -67,7 +67,8 @@ Account behavior:
 
 Signed-in members can keep adding transactions with no connection. They queue on-device (localStorage) and sync automatically when back online.
 
-- Identity boundary: every queued op is stamped with its owning account and only ever replays under that same session. Another account signing in on the same device never syncs, retries, or discards your ops — the queue bar says whose they are until the owner returns.
+- Identity boundary: every queued op is stamped with its owning account and only ever replays *and renders* under that same session. Another account signing in on the same device neither syncs, sees, retries, nor discards your ops — the queue bar says whose they are until the owner returns.
+- Unstamped ops predate tracking and belong to nobody: they never auto-replay. The queue bar lists them for explicit Adopt (stamp to me — only if they're yours) or Discard recovery.
 - Sign-out flushes your pending ops while online; offline (or after a failed flush) it warns before signing out. Queued writes survive sign-outs and sync when you sign back in.
 - Attribution and membership always derive from the live session server-side — the stamp is routing-only and never trusted.
 
