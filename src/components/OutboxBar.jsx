@@ -24,12 +24,14 @@ function ForeignNotice({ count }) {
   );
 }
 
-export function OutboxBar({ items, userId, online, syncing, onSync, onRetry, onDiscard }) {
+export function OutboxBar({ items, userId, online, syncing, onSync, onRetry, onDiscard, onAdopt }) {
   if (!items.length) return null;
-  // Identity boundary: only my stamped ops sync under this session.
-  // Foreign ops are shown but never touched.
-  const mine = items.filter((o) => opBelongsTo(o, userId));
-  const foreign = items.filter((o) => !opBelongsTo(o, userId));
+  // Identity boundary: stamped ops belong to exactly one session; unstamped
+  // (pre-tracking) ops belong to nobody. Only mine sync, retry or render —
+  // foreign rows are display-only, orphans need explicit Adopt/Discard.
+  const mine = items.filter((o) => o.userId && opBelongsTo(o, userId));
+  const orphans = items.filter((o) => !o.userId);
+  const foreign = items.filter((o) => o.userId && !opBelongsTo(o, userId));
   const pending = mine.filter((o) => o.status !== "failed");
   const failed = mine.filter((o) => o.status === "failed");
 
@@ -83,6 +85,28 @@ export function OutboxBar({ items, userId, online, syncing, onSync, onRetry, onD
           <Icon.Clock className="h-4 w-4 shrink-0" />
           <span>Queued changes on this device belong to another account.</span>
         </p>
+      )}
+      {orphans.length > 0 && (
+        <ul className="mt-2.5 space-y-1.5">
+          {orphans.map((o) => (
+            <li key={o.opId} className="flex items-center gap-2 rounded-xl bg-white/70 px-3 py-2 text-[13px] dark:bg-white/[0.04]">
+              <span className="min-w-0 flex-1 truncate text-slate-600 dark:text-slate-300">
+                {opLabel(o)}
+                <span className="text-slate-400 dark:text-slate-500"> · pre-tracking queue — adopt only if it&apos;s yours</span>
+              </span>
+              {userId && (
+                <button onClick={() => onAdopt(o.opId)}
+                  className="shrink-0 rounded-lg px-2 py-1.5 font-semibold text-teal-700 hover:bg-teal-700/10 cursor-pointer dark:text-teal-300">
+                  Adopt
+                </button>
+              )}
+              <button onClick={() => onDiscard(o.opId)}
+                className="shrink-0 rounded-lg px-2 py-1.5 font-semibold text-red-600 hover:bg-red-50 cursor-pointer dark:text-red-400 dark:hover:bg-red-500/10">
+                Discard
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
       <ForeignNotice count={foreign.length} />
     </div>

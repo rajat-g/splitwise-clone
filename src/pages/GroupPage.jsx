@@ -7,8 +7,8 @@ import { EXPENSE_CATEGORIES, categoryLabel, categoryTone, normalizeCategory } fr
 import { getDeviceId, saveRecentGroup } from "../lib/identity";
 import { useOnline } from "../lib/useOnline";
 import {
-  applyOutboxToExpenses, countPendingOps, dropOp, enqueueAdd, enqueueRemove, enqueueUpdate,
-  filterGroupOps, loadSnapshot, newOpId, retryOp, saveSnapshot, useOutbox,
+  adoptOp, applyOutboxToExpenses, countPendingOps, dropOp, enqueueAdd, enqueueRemove, enqueueUpdate,
+  filterGroupOps, loadSnapshot, newOpId, opBelongsTo, retryOp, saveSnapshot, useOutbox,
 } from "../lib/offline";
 import { syncOutbox } from "../lib/sync";
 import { Alert, Avatar, AvatarStack, Badge, Button, Card, EmptyState, Icon, LiveDot, Progress, SectionTitle, Select, SkeletonRows, Stat, Tabs, TextInput } from "../components/ui";
@@ -124,7 +124,17 @@ export default function GroupPage() {
   const online = useOnline();
   const allOps = useOutbox();
 
-  const groupOps = useMemo(() => filterGroupOps(allOps, publicId), [allOps, publicId]);
+  // Identity boundary: the device outbox is shared across accounts, so the
+  // group queue is split — allGroupOps (explains the OutboxBar, incl.
+  // foreign/orphaned rows) vs myGroupOps (the ONLY set layered into the
+  // visible expenses, balances and counts). Another account's pending data
+  // must never render here.
+  const allGroupOps = useMemo(() => filterGroupOps(allOps, publicId), [allOps, publicId]);
+  const myGroupOps = useMemo(
+    () => allGroupOps.filter((o) => opBelongsTo(o, viewer?._id ?? null)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allGroupOps, viewer?._id]
+  );
   // Only MY pending ops trigger auto-sync — another account's queued writes
   // on this device wait for their session (identity boundary).
   const pendingOnly = useMemo(
@@ -134,8 +144,8 @@ export default function GroupPage() {
   );
   const snapForRender = useMemo(() => (!online ? loadSnapshot(publicId) : null), [online, publicId]);
   const visibleExpenses = useMemo(
-    () => applyOutboxToExpenses(expenses ?? snapForRender?.expenses ?? [], groupOps),
-    [expenses, snapForRender, groupOps]
+    () => applyOutboxToExpenses(expenses ?? snapForRender?.expenses ?? [], myGroupOps),
+    [expenses, snapForRender, myGroupOps]
   );
   const visibleMembers = useMemo(
     () => members ?? snapForRender?.members ?? [],
@@ -541,10 +551,11 @@ export default function GroupPage() {
         </div>
       )}
       <OutboxBar
-        items={groupOps} userId={viewer?._id ?? null} online={online} syncing={syncing}
+        items={allGroupOps} userId={viewer?._id ?? null} online={online} syncing={syncing}
         onSync={() => runSync({ includeFailed: true })}
         onRetry={(opId) => { retryOp(opId); runSync({ includeFailed: true }); }}
         onDiscard={(opId) => dropOp(opId)}
+        onAdopt={(opId) => adoptOp(opId, viewer?._id ?? null)}
       />
       {/* Group header */}
       <Card className="overflow-hidden">

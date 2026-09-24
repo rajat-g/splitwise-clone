@@ -319,7 +319,7 @@ describe("GroupPage edge paths", () => {
 
   it("auto-syncs failures and handles retry and discard", async () => {
     mockAuthed();
-    enqueueAdd("abc", entry);
+    enqueueAdd("abc", entry, "u1");
     renderPage();
     await waitFor(() => expect(screen.getByText(/couldn't sync/)).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /sync now/i }));
@@ -581,6 +581,16 @@ describe("GroupPage edge paths", () => {
     await waitFor(() => expect(screen.getByText(/belong to another account/i)).toBeInTheDocument());
     expect(mutations.addExpense).not.toHaveBeenCalled();
     expect(getOutbox()).toHaveLength(1);
+  });
+
+  it("never renders another account's queued ops or balances", async () => {
+    mockAuthed();
+    enqueueAdd("abc", { ...entry, description: "Sneaky", amountCents: 99900 }, "u-other");
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/belong to another account/i)).toBeInTheDocument());
+    expect(screen.queryByText("Sneaky")).not.toBeInTheDocument();
+    // Totals ignore the foreign op: 100.00 + 60.00, not +999.00.
+    expect(screen.getByText("$160.00")).toBeInTheDocument();
   });
 
   it("shows left members read-only and excludes them from new splits", async () => {

@@ -32,34 +32,34 @@ function client(impl = {}) {
 
 describe("syncOutbox", () => {
   it("replays adds and drops them on success", async () => {
-    enqueueAdd(G, entry);
+    enqueueAdd(G, entry, "u1");
     const c = client();
-    const res = await syncOutbox(c, G);
+    const res = await syncOutbox(c, G, { userId: "u1" });
     expect(res).toEqual({ synced: 1, total: 1 });
     expect(c.mutation).toHaveBeenCalledTimes(1);
     expect(getOutbox()).toHaveLength(0);
   });
 
   it("passes category/splitMode defaults for legacy queued entries", async () => {
-    enqueueAdd(G, entry);
+    enqueueAdd(G, { ...entry, category: undefined, splitMode: undefined }, "u1");
     const c = client();
-    await syncOutbox(c, G);
+    await syncOutbox(c, G, { userId: "u1" });
     expect(c.mutation.mock.calls[0][1]).toMatchObject({ category: "other", splitMode: "equal" });
   });
 
   it("merges an update queued behind its own add into one synced op", async () => {
-    const tempId = enqueueAdd(G, entry);
-    enqueueUpdate(G, tempId, { ...entry, description: "Edited" });
+    const tempId = enqueueAdd(G, entry, "u1");
+    enqueueUpdate(G, tempId, { ...entry, description: "Edited" }, "u1");
     const c = client();
-    const res = await syncOutbox(c, G);
+    const res = await syncOutbox(c, G, { userId: "u1" });
     expect(res).toEqual({ synced: 1, total: 1 });
     expect(c.mutation.mock.calls[0][1].description).toBe("Edited");
     expect(getOutbox()).toHaveLength(0);
   });
 
   it("marks failing ops as failed with a trimmed message", async () => {
-    enqueueUpdate(G, "missing", entry);
-    const res = await syncOutbox(client(), G);
+    enqueueUpdate(G, "missing", entry, "u1");
+    const res = await syncOutbox(client(), G, { userId: "u1" });
     expect(res).toEqual({ synced: 0, total: 1 });
     const [op] = getOutbox();
     expect(op.status).toBe("failed");
@@ -67,9 +67,9 @@ describe("syncOutbox", () => {
   });
 
   it("holds a remove that points at an unknown temp id for retry", async () => {
-    enqueueAdd(G, entry);
-    enqueueRemove(G, "tmp-orphan");
-    const res = await syncOutbox(client(), G);
+    enqueueAdd(G, entry, "u1");
+    enqueueRemove(G, "tmp-orphan", "u1");
+    const res = await syncOutbox(client(), G, { userId: "u1" });
     expect(res).toEqual({ synced: 1, total: 2 });
     const [leftover] = getOutbox();
     expect(leftover.kind).toBe("remove");
@@ -79,17 +79,25 @@ describe("syncOutbox", () => {
 
   it("does nothing when the queue is empty", async () => {
     const c = client();
-    expect(await syncOutbox(c, G)).toEqual({ synced: 0, total: 0 });
+    expect(await syncOutbox(c, G, { userId: "u1" })).toEqual({ synced: 0, total: 0 });
     expect(c.mutation).not.toHaveBeenCalled();
   });
 
   it("replays updates and removes", async () => {
-    enqueueUpdate(G, "e1", { ...entry, description: "Edited" });
-    enqueueRemove(G, "e2");
+    enqueueUpdate(G, "e1", { ...entry, description: "Edited" }, "u1");
+    enqueueRemove(G, "e2", "u1");
     const c = client();
-    const res = await syncOutbox(c, G);
+    const res = await syncOutbox(c, G, { userId: "u1" });
     expect(res).toEqual({ synced: 2, total: 2 });
     expect(getOutbox()).toHaveLength(0);
+  });
+
+  it("leaves unstamped legacy ops for explicit recovery", async () => {
+    enqueueAdd(G, entry);
+    const c = client();
+    expect(await syncOutbox(c, G, { userId: "u1" })).toEqual({ synced: 0, total: 0 });
+    expect(c.mutation).not.toHaveBeenCalled();
+    expect(getOutbox()).toHaveLength(1);
   });
 
   it("never replays another account's ops", async () => {

@@ -5,7 +5,7 @@ import { OutboxBar } from "./OutboxBar";
 const addOp = (over = {}) => ({
   opId: "op-1", groupPublicId: "g", kind: "add", tempId: "tmp-1",
   entry: { description: "Dinner", isSettlement: false },
-  status: "pending", error: "", ...over,
+  status: "pending", error: "", userId: "u1", ...over,
 });
 
 describe("OutboxBar", () => {
@@ -19,7 +19,7 @@ describe("OutboxBar", () => {
   it("shows pending count and syncs", () => {
     const onSync = vi.fn();
     render(
-      <OutboxBar items={[addOp(), addOp({ opId: "op-2" })]} online={false} syncing={false}
+      <OutboxBar items={[addOp(), addOp({ opId: "op-2" })]} userId="u1" online={false} syncing={false}
         onSync={onSync} onRetry={() => {}} onDiscard={() => {}} />
     );
     expect(screen.getByText(/2 changes/)).toBeInTheDocument();
@@ -33,7 +33,7 @@ describe("OutboxBar", () => {
   it("shows syncing state when online", () => {
     const onSync = vi.fn();
     render(
-      <OutboxBar items={[addOp()]} online syncing onSync={onSync} onRetry={() => {}} onDiscard={() => {}} />
+      <OutboxBar items={[addOp()]} userId="u1" online syncing onSync={onSync} onRetry={() => {}} onDiscard={() => {}} />
     );
     expect(screen.getByText(/waiting to sync/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Syncing…" })).toBeDisabled();
@@ -46,11 +46,11 @@ describe("OutboxBar", () => {
       <OutboxBar
         items={[
           addOp({ opId: "f1", status: "failed", error: "boom" }),
-          { opId: "f2", groupPublicId: "g", kind: "update", status: "failed", error: "" },
-          { opId: "f3", groupPublicId: "g", kind: "remove", status: "failed", error: "" },
-          { opId: "f4", groupPublicId: "g", kind: "add", entry: { description: "P", isSettlement: true }, status: "failed", error: "" },
+          { opId: "f2", groupPublicId: "g", kind: "update", status: "failed", error: "", userId: "u1" },
+          { opId: "f3", groupPublicId: "g", kind: "remove", status: "failed", error: "", userId: "u1" },
+          { opId: "f4", groupPublicId: "g", kind: "add", entry: { description: "P", isSettlement: true }, status: "failed", error: "", userId: "u1" },
         ]}
-        online syncing={false} onSync={() => {}} onRetry={onRetry} onDiscard={onDiscard}
+        userId="u1" online syncing={false} onSync={() => {}} onRetry={onRetry} onDiscard={onDiscard}
       />
     );
     expect(screen.getByText(/couldn't sync/)).toBeInTheDocument();
@@ -66,7 +66,7 @@ describe("OutboxBar", () => {
   it("syncs pending ops when online", () => {
     const onSync = vi.fn();
     render(
-      <OutboxBar items={[addOp()]} online syncing={false}
+      <OutboxBar items={[addOp()]} userId="u1" online syncing={false}
         onSync={onSync} onRetry={() => {}} onDiscard={() => {}} />
     );
     fireEvent.click(screen.getByRole("button", { name: /sync now/i }));
@@ -75,7 +75,7 @@ describe("OutboxBar", () => {
 
   it("disables retry while offline", () => {
     render(
-      <OutboxBar items={[addOp({ status: "failed", error: "x" })]} online={false} syncing={false}
+      <OutboxBar items={[addOp({ status: "failed", error: "x" })]} userId="u1" online={false} syncing={false}
         onSync={() => {}} onRetry={() => {}} onDiscard={() => {}} />
     );
     expect(screen.getByRole("button", { name: "Retry" })).toBeDisabled();
@@ -83,8 +83,8 @@ describe("OutboxBar", () => {
 
   it("labels entries without a description", () => {
     render(
-      <OutboxBar items={[{ opId: "e1", groupPublicId: "g", kind: "add", status: "failed", error: "" }]}
-        online syncing={false} onSync={() => {}} onRetry={() => {}} onDiscard={() => {}} />
+      <OutboxBar items={[{ opId: "e1", groupPublicId: "g", kind: "add", status: "failed", error: "", userId: "u1" }]}
+        userId="u1" online syncing={false} onSync={() => {}} onRetry={() => {}} onDiscard={() => {}} />
     );
     expect(screen.getByText(/expense queued: expense/i)).toBeInTheDocument();
   });
@@ -113,5 +113,30 @@ describe("OutboxBar", () => {
     expect(screen.getByText(/different signed-in account/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /sync now/i }));
     expect(onSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers adopt-or-discard recovery for unstamped orphans", () => {
+    const onAdopt = vi.fn();
+    const onDiscard = vi.fn();
+    const orphan = { opId: "o1", groupPublicId: "g", kind: "add", tempId: "tmp-1",
+      entry: { description: "Old", isSettlement: false }, status: "failed", error: "denied" };
+    render(
+      <OutboxBar items={[orphan]} userId="u1"
+        online syncing={false} onSync={() => {}} onRetry={() => {}} onDiscard={onDiscard} onAdopt={onAdopt} />
+    );
+    expect(screen.getByText(/pre-tracking queue/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Adopt" }));
+    expect(onAdopt).toHaveBeenCalledWith("o1");
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(onDiscard).toHaveBeenCalledWith("o1");
+  });
+
+  it("hides adopt from guests but keeps discard", () => {
+    render(
+      <OutboxBar items={[{ opId: "o1", groupPublicId: "g", kind: "add", status: "pending", error: "" }]}
+        online syncing={false} onSync={() => {}} onRetry={() => {}} onDiscard={() => {}} onAdopt={() => {}} />
+    );
+    expect(screen.queryByRole("button", { name: "Adopt" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Discard" })).toBeInTheDocument();
   });
 });

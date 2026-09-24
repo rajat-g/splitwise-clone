@@ -94,12 +94,16 @@ export function countPendingOps(list, publicId, userId) {
 /**
  * Identity boundary for the shared-device outbox. Every op is stamped with
  * the owning account id at enqueue time; the stamp is routing-only (which
- * session may replay it) and is never trusted server-side — attribution and
- * membership always derive from the live auth session. Unstamped ops predate
- * stamping and stay replayable by anyone (legacy fallback).
+ * session may replay or display it) and is never trusted server-side —
+ * attribution and membership always derive from the live auth session.
+ *
+ * Unstamped ops predate stamping and belong to NOBODY: they neither replay
+ * nor render under any session. Guessing ownership for a financial ledger
+ * is worse than asking — orphans surface in the queue bar with explicit
+ * Adopt (stamp to me) / Discard actions instead.
  */
 export function opBelongsTo(op, userId) {
-  if (!op || !op.userId) return true;
+  if (!op?.userId) return false;
   if (!userId) return false;
   return String(op.userId) === String(userId);
 }
@@ -226,6 +230,25 @@ export function dropOp(opId) {
 
 export function retryOp(opId) {
   markOp(opId, { status: "pending", error: "" });
+}
+
+/**
+ * Explicit recovery for unstamped (pre-tracking) ops: stamp one to the
+ * current account so it replays under that session. Only unstamped ops can
+ * be adopted — stamped ops already have an owner. Returns whether it did.
+ */
+export function adoptOp(opId, userId) {
+  if (!userId) return false;
+  let adopted = false;
+  outbox = outbox.map((o) => {
+    if (o.opId === opId && !o.userId) {
+      adopted = true;
+      return { ...o, userId };
+    }
+    return o;
+  });
+  if (adopted) persist();
+  return adopted;
 }
 
 /** Layer queued ops over server/cached expenses for display + balances. */

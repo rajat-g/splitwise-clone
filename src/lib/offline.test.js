@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
 import {
+  adoptOp,
   applyOutboxToExpenses,
   countPendingOps,
   dropOp,
@@ -77,11 +78,11 @@ describe("ids", () => {
 
 describe("enqueue / filter", () => {
   it("queues adds scoped to a group", () => {
-    enqueueAdd(G, addEntry());
-    enqueueAdd("other", addEntry());
+    enqueueAdd(G, addEntry(), "u1");
+    enqueueAdd("other", addEntry(), "u1");
     expect(opsForGroup(G)).toHaveLength(1);
-    expect(pendingCountForGroup(G)).toBe(1);
-    expect(countPendingOps(getOutbox(), G)).toBe(1);
+    expect(pendingCountForGroup(G, "u1")).toBe(1);
+    expect(countPendingOps(getOutbox(), G, "u1")).toBe(1);
     expect(filterGroupOps(getOutbox(), G, { includeFailed: false })).toHaveLength(1);
   });
 
@@ -121,14 +122,14 @@ describe("enqueue / filter", () => {
   });
 
   it("markOp / retryOp / dropOp manage lifecycle", () => {
-    const tempId = enqueueAdd(G, addEntry());
+    const tempId = enqueueAdd(G, addEntry(), "u1");
     const [op] = getOutbox();
     markOp(op.opId, { status: "failed", error: "boom" });
-    expect(pendingCountForGroup(G)).toBe(0);
+    expect(pendingCountForGroup(G, "u1")).toBe(0);
     expect(opsForGroup(G)).toHaveLength(1);
     expect(opsForGroup(G, { includeFailed: false })).toHaveLength(0);
     retryOp(op.opId);
-    expect(pendingCountForGroup(G)).toBe(1);
+    expect(pendingCountForGroup(G, "u1")).toBe(1);
     dropOp(op.opId);
     expect(getOutbox()).toHaveLength(0);
     expect(tempId.startsWith("tmp-")).toBe(true);
@@ -203,24 +204,37 @@ describe("identity boundary", () => {
     expect(getOutbox().at(-1).userId).toBeNull();
   });
 
-  it("routes ops by stamp, keeping legacy unstamped ops replayable", () => {
+  it("routes ops by stamp, orphaning unstamped ones", () => {
     expect(opBelongsTo({ userId: "u1" }, "u1")).toBe(true);
     expect(opBelongsTo({ userId: "u1" }, "u2")).toBe(false);
     expect(opBelongsTo({ userId: "u1" }, null)).toBe(false);
-    expect(opBelongsTo({}, "u1")).toBe(true);
-    expect(opBelongsTo({}, null)).toBe(true);
-    expect(opBelongsTo(null, "u1")).toBe(true);
+    expect(opBelongsTo({}, "u1")).toBe(false);
+    expect(opBelongsTo({}, null)).toBe(false);
+    expect(opBelongsTo(null, "u1")).toBe(false);
   });
 
   it("counts and lists only my pending ops", () => {
     enqueueAdd(G, addEntry(), "u1");
     enqueueAdd(G, addEntry(), "u2");
+    enqueueAdd(G, addEntry());
     const ops = getOutbox();
     expect(countPendingOps(ops, G, "u1")).toBe(1);
     expect(countPendingOps(ops, G, "u2")).toBe(1);
     expect(countPendingOps(ops, G, null)).toBe(0);
+    expect(countPendingOps(ops, G)).toBe(0);
     expect(myPendingOps(ops, G, "u1")).toHaveLength(1);
     expect(pendingCountForGroup(G, "u1")).toBe(1);
     expect(pendingCountForGroup(G)).toBe(0); // unknown session replays nothing stamped
+  });
+
+  it("adopts only unstamped ops, never another account's", () => {
+    enqueueAdd(G, addEntry());
+    enqueueAdd(G, addEntry(), "u2");
+    const [orphan, foreign] = getOutbox();
+    expect(adoptOp(orphan.opId, "u1")).toBe(true);
+    expect(adoptOp(foreign.opId, "u1")).toBe(false);
+    expect(adoptOp(orphan.opId, null)).toBe(false);
+    expect(getOutbox().find((o) => o.opId === orphan.opId).userId).toBe("u1");
+    expect(myPendingOps(getOutbox(), G, "u1")).toHaveLength(1);
   });
 });
