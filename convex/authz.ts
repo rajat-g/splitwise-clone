@@ -48,7 +48,7 @@ export async function requireGroupMember(ctx: MutationCtx, groupId: Id<"groups">
     .withIndex("by_group", (q) => q.eq("groupId", groupId))
     .collect();
   const member = members.find(
-    (m) => m.userId !== undefined && m.userId === userId && m.status !== "left"
+    (m) => m.userId !== undefined && m.userId === userId && m.status === "active"
   ) ?? null;
   if (!member) {
     throw new Error("You are not a member of this group. Join it first to make changes.");
@@ -58,23 +58,17 @@ export async function requireGroupMember(ctx: MutationCtx, groupId: Id<"groups">
 
 /**
  * Ownership check for owner-level controls (invite-code rotation).
- * Groups always record ownerUserId at creation; ownerless legacy groups
- * fall back to plain membership so the code never becomes un-rotatable.
- * Returns true when the caller proved ownership via ownerUserId.
+ * Group ownership is established by ownerUserId at creation.
  */
 export async function requireGroupOwner(
   ctx: MutationCtx,
-  group: { _id: Id<"groups">; ownerUserId?: Id<"users"> }
-): Promise<{ userId: Id<"users">; owned: boolean }> {
+  group: { _id: Id<"groups">; ownerUserId: Id<"users"> }
+): Promise<{ userId: Id<"users">; owned: true }> {
   const userId = await getAuthUserId(ctx);
   if (!userId) {
     throw new Error("Sign in to make changes. Guests can view only.");
   }
-  if (!group.ownerUserId) {
-    await requireGroupMember(ctx, group._id);
-    return { userId, owned: false };
-  }
-  if (group.ownerUserId !== undefined && group.ownerUserId !== userId) {
+  if (group.ownerUserId !== userId) {
     throw new Error("Only the group owner can do this.");
   }
   return { userId, owned: true };

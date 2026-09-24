@@ -8,8 +8,13 @@
 import { useSyncExternalStore } from "react";
 
 const OUTBOX_KEY = "fairsplit:outbox:v1";
-const SNAP_PREFIX = "fairsplit:snap:v1:";
+const SNAP_PREFIX = "fairsplit:snap:v2:";
+const PRIVATE_SNAP_PREFIX = "fairsplit:private-snap:v2:";
 const MAX_SNAP_EXPENSES = 300;
+
+function ownedBy(op, userId) {
+  return opBelongsTo(op, userId);
+}
 
 export function newOpId() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
@@ -27,7 +32,11 @@ export function isTempId(id) {
 function readOutbox() {
   try {
     const raw = JSON.parse(localStorage.getItem(OUTBOX_KEY) || "[]");
-    return Array.isArray(raw) ? raw : [];
+    return Array.isArray(raw)
+      ? raw.filter((op) => op && typeof op === "object").map((op) =>
+          op.status === "syncing" ? { ...op, status: "pending", error: "" } : op
+        )
+      : [];
   } catch {
     return [];
   }
@@ -97,10 +106,8 @@ export function countPendingOps(list, publicId, userId) {
  * session may replay or display it) and is never trusted server-side —
  * attribution and membership always derive from the live auth session.
  *
- * Unstamped ops predate stamping and belong to NOBODY: they neither replay
- * nor render under any session. Guessing ownership for a financial ledger
- * is worse than asking — orphans surface in the queue bar with explicit
- * Adopt (stamp to me) / Discard actions instead.
+ * Every operation must carry the current account id. It is used only for
+ * local queue routing; the server derives identity from the live session.
  */
 export function opBelongsTo(op, userId) {
   if (!op?.userId) return false;
@@ -115,7 +122,12 @@ export function myPendingOps(list, publicId, userId) {
   );
 }
 
-export function enqueueAdd(publicId, entry, userId = null) {
+function requireUserId(userId) {
+  if (!userId) throw new Error("Sign in before queuing a change.");
+  return String(userId);
+}
+
+export function enqueueAdd(publicId, entry, userId) {
   const op = {
     opId: newOpId(),
     groupPublicId: publicId,
@@ -123,7 +135,7 @@ export function enqueueAdd(publicId, entry, userId = null) {
     tempId: newTempId(),
     clientId: newOpId(),
     entry,
-    userId: userId ?? null,
+    userId: requireUserId(userId),
     createdAt: Date.now(),
     status: "pending",
     error: "",
@@ -133,12 +145,13 @@ export function enqueueAdd(publicId, entry, userId = null) {
   return op.tempId;
 }
 
-export function enqueueUpdate(publicId, expenseId, patch, userId = null) {
+export function enqueueUpdate(publicId, expenseId, patch, userId) {
+  userId = requireUserId(userId);
   const id = String(expenseId);
   const { isSettlement, ...rest } = patch;
   void isSettlement;
   const addOp = outbox.find(
-    (o) => o.groupPublicId === publicId && o.kind === "add" && o.tempId === id && o.status !== "syncing"
+    (o) => o.groupPublicId === publicId && o.kind === "add" && o.tempId === id && o.status !== "syncing" && ownedBy(o, userId)
   );
   if (addOp) {
     addOp.entry = { ...addOp.entry, ...rest };
@@ -151,7 +164,8 @@ export function enqueueUpdate(publicId, expenseId, patch, userId = null) {
       o.groupPublicId === publicId &&
       o.kind === "update" &&
       String(o.expenseId) === id &&
-      o.status !== "syncing"
+      o.status !== "syncing" &&
+      ownedBy(o, userId)
   );
   if (updOp) {
     updOp.patch = { ...updOp.patch, ...rest };
@@ -167,7 +181,7 @@ export function enqueueUpdate(publicId, expenseId, patch, userId = null) {
       kind: "update",
       expenseId: id,
       patch: rest,
-      userId: userId ?? null,
+      userId,
       createdAt: Date.now(),
       status: "pending",
       error: "",
@@ -177,10 +191,11 @@ export function enqueueUpdate(publicId, expenseId, patch, userId = null) {
   return id;
 }
 
-export function enqueueRemove(publicId, expenseId, userId = null) {
+export function enqueueRemove(publicId, expenseId, userId) {
+  userId = requireUserId(userId);
   const id = String(expenseId);
   const addIdx = outbox.findIndex(
-    (o) => o.groupPublicId === publicId && o.kind === "add" && o.tempId === id && o.status !== "syncing"
+    (o) => o.groupPublicId === publicId && o.kind === "add" && o.tempId === id && o.status !== "syncing" && ownedBy(o, userId)
   );
   if (addIdx >= 0) {
     // Never reached the server — just drop it (plus any merged edits).
@@ -189,7 +204,7 @@ export function enqueueRemove(publicId, expenseId, userId = null) {
     return "dropped";
   }
   outbox = outbox.filter(
-    (o) => !(o.groupPublicId === publicId && o.kind === "update" && String(o.expenseId) === id)
+    (o) => !(o.groupPublicId === publicId && o.kind === "update" && String(o.expenseId) === id && ownedBy(o, userId))
   );
   if (
     !outbox.some(
@@ -197,7 +212,8 @@ export function enqueueRemove(publicId, expenseId, userId = null) {
         o.groupPublicId === publicId &&
         o.kind === "remove" &&
         String(o.expenseId) === id &&
-        o.status !== "syncing"
+        o.status !== "syncing" &&
+        ownedBy(o, userId)
     )
   ) {
     outbox = [
@@ -207,7 +223,7 @@ export function enqueueRemove(publicId, expenseId, userId = null) {
         groupPublicId: publicId,
         kind: "remove",
         expenseId: id,
-        userId: userId ?? null,
+        userId,
         createdAt: Date.now(),
         status: "pending",
         error: "",
@@ -230,25 +246,6 @@ export function dropOp(opId) {
 
 export function retryOp(opId) {
   markOp(opId, { status: "pending", error: "" });
-}
-
-/**
- * Explicit recovery for unstamped (pre-tracking) ops: stamp one to the
- * current account so it replays under that session. Only unstamped ops can
- * be adopted — stamped ops already have an owner. Returns whether it did.
- */
-export function adoptOp(opId, userId) {
-  if (!userId) return false;
-  let adopted = false;
-  outbox = outbox.map((o) => {
-    if (o.opId === opId && !o.userId) {
-      adopted = true;
-      return { ...o, userId };
-    }
-    return o;
-  });
-  if (adopted) persist();
-  return adopted;
 }
 
 /** Layer queued ops over server/cached expenses for display + balances. */
@@ -282,28 +279,52 @@ export function applyOutboxToExpenses(base, ops) {
   return rows;
 }
 
-export function saveSnapshot(publicId, data) {
+export function saveSnapshot(publicId, data, userId = null) {
+  const publicMembers = (data.members || []).map(({ email, userId: memberUserId, deviceId, ...member }) => {
+    void email; void memberUserId; void deviceId;
+    return member;
+  });
+  const publicData = {
+    savedAt: Date.now(),
+    group: {
+      _id: data.group?._id,
+      publicId: data.group?.publicId,
+      name: data.group?.name,
+      currency: data.group?.currency,
+      inviteCode: data.group?.inviteCode,
+    },
+    members: publicMembers,
+    expenses: (data.expenses || []).slice(0, MAX_SNAP_EXPENSES),
+    activity: (data.activity || []).slice(0, 100),
+  };
   try {
-    localStorage.setItem(
-      SNAP_PREFIX + publicId,
-      JSON.stringify({
-        savedAt: Date.now(),
-        group: data.group,
+    localStorage.setItem(SNAP_PREFIX + publicId, JSON.stringify(publicData));
+    if (userId) {
+      localStorage.setItem(PRIVATE_SNAP_PREFIX + publicId + ":" + userId, JSON.stringify({
+        savedAt: publicData.savedAt,
         members: data.members,
-        expenses: (data.expenses || []).slice(0, MAX_SNAP_EXPENSES),
-        activity: (data.activity || []).slice(0, 100),
-      })
-    );
+        ownerUserId: data.group?.ownerUserId,
+      }));
+    }
   } catch {
     // ignore quota errors
   }
 }
 
-export function loadSnapshot(publicId) {
+export function loadSnapshot(publicId, userId = null) {
   try {
     const raw = localStorage.getItem(SNAP_PREFIX + publicId);
     if (!raw) return null;
-    return JSON.parse(raw);
+    const snapshot = JSON.parse(raw);
+    if (userId) {
+      const privateRaw = localStorage.getItem(PRIVATE_SNAP_PREFIX + publicId + ":" + userId);
+      if (privateRaw) {
+        const privateData = JSON.parse(privateRaw);
+        snapshot.members = privateData.members;
+        if (privateData.ownerUserId) snapshot.group.ownerUserId = privateData.ownerUserId;
+      }
+    }
+    return snapshot;
   } catch {
     return null;
   }

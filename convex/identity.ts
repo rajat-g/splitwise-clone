@@ -25,7 +25,7 @@ export async function resolveActorName(ctx: MutationCtx): Promise<string> {
 
 /**
  * Mailbox proof for email-based linking. Set when the account verifies its
- * address via OTP; unverified (and legacy never-verified) accounts fail
+ * address via OTP; unverified accounts fail
  * this check, so group invites can never attach to an unproven address.
  */
 export function userEmailVerified(user: Doc<"users"> | null): boolean {

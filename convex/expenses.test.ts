@@ -115,6 +115,8 @@ describe("expenses.add", () => {
         paidBy,
         splits,
         date: "2026-09-21",
+        category: "other",
+        splitMode: "equal",
         isSettlement: true,
       });
     await expect(settle(
@@ -131,18 +133,19 @@ describe("expenses.add", () => {
 
   it("rejects guests", async () => {
     const t = fresh();
+    const { userId } = await seedUser(t);
     // Seed rows directly so args pass validators and reach requireAuth.
     const ids = await t.run(async (ctx) => {
       const groupId = await ctx.db.insert("groups", {
         publicId: "x", name: "G", currency: "$", inviteCode: "ABCDEFGHIJ",
-        createdByName: "X", createdAt: 1,
+        createdByName: "X", createdAt: 1, ownerUserId: userId, ledgerRevision: 0,
       });
-      const memberId = await ctx.db.insert("members", { groupId, name: "M", createdAt: 1 });
+      const memberId = await ctx.db.insert("members", { groupId, name: "M", status: "active", createdAt: 1 });
       return { memberId };
     });
     await expect(t.mutation(api.expenses.add, {
       publicId: "x", description: "D", amountCents: 100, paidBy: ids.memberId,
-      splits: [{ memberId: ids.memberId, amountCents: 100 }], date: "2026-09-20", isSettlement: false,
+      splits: [{ memberId: ids.memberId, amountCents: 100 }], date: "2026-09-20", category: "other", splitMode: "equal", isSettlement: false,
     })).rejects.toThrow(/sign in/i);
   });
 
@@ -175,12 +178,16 @@ describe("expenses.add", () => {
       expenseId: (await authed.mutation(api.expenses.add, { publicId: g.publicId, ...base }))._id,
       description: "X", amountCents: 9000, paidBy: outsider._id,
       splits: [{ memberId: ann._id, amountCents: 9000 }], date: "2026-09-20",
+      category: "other",
+      splitMode: "equal",
     })).rejects.toThrow(/not a member/i);
     await expect(authed.mutation(api.expenses.update, {
       publicId: g.publicId,
       expenseId: (await authed.mutation(api.expenses.add, { publicId: g.publicId, ...base }))._id,
       description: "X", amountCents: 9000, paidBy: creator._id,
       splits: [{ memberId: outsider._id, amountCents: 9000 }], date: "2026-09-20",
+      category: "other",
+      splitMode: "equal",
     })).rejects.toThrow(/not in this group/i);
   });
 });
@@ -247,11 +254,15 @@ describe("expenses.update", () => {
       paidBy: creator._id,
       splits: [{ memberId: ann._id, amountCents: 1000 }],
       date: "2026-09-21",
+      category: "other",
+      splitMode: "equal",
       isSettlement: true,
     });
     await expect(authed.mutation(api.expenses.update, {
       publicId: g.publicId, expenseId: _id, description: "X", amountCents: 1000,
       paidBy: creator._id, splits: [{ memberId: ann._id, amountCents: 1000 }], date: "2026-09-21",
+      category: "other",
+      splitMode: "equal",
     })).rejects.toThrow(/settlements cannot be edited/i);
   });
 
@@ -266,11 +277,15 @@ describe("expenses.update", () => {
       paidBy: outsider._id,
       splits: [{ memberId: outsider._id, amountCents: 1000 }],
       date: "2026-09-21",
+      category: "other",
+      splitMode: "equal",
       isSettlement: false,
     });
     await expect(authed.mutation(api.expenses.update, {
       publicId: g.publicId, expenseId: _id, description: "X", amountCents: 1000,
       paidBy: creator._id, splits: [{ memberId: creator._id, amountCents: 1000 }], date: "2026-09-21",
+      category: "other",
+      splitMode: "equal",
     })).rejects.toThrow(/expense not found/i);
   });
 });

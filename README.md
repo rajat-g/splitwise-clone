@@ -49,6 +49,9 @@ npm run setup:auth              # dev deployment
 npm run setup:auth -- --prod    # production deployment
 ```
 
+The setup script refuses to replace existing auth keys. Replacing them
+invalidates current sessions; use `--rotate` only when that is intended.
+
 Then `npx convex dev` (or `npx convex deploy` for prod) to push functions.
 
 Manual alternative: `node scripts/generate-auth-keys.mjs`, then
@@ -62,25 +65,23 @@ Account behavior:
 - Guests opening an invite link can view balances, expenses, members, activity — write controls are hidden and the backend rejects writes ("Sign in to make changes." for guests, "You are not a member of this group." for signed-in outsiders). Signed-in outsiders see a Join prompt.
 - Trust boundary: account emails are verified via one-time code before any session exists — signup takes any email string, but an address confers nothing until its mailbox proves it. Email invites link only to verified accounts (first-come registration without verification cannot impersonate or lock anyone out: the squatter can never complete signup). Display names were never trustworthy (free-form at signup); treat member email subtitles as labels.
 - Email sending (Resend, free tier): `npx convex env set RESEND_API_KEY re_... [--prod]`, optional `AUTH_EMAIL_FROM "FairSplit <noreply@yourdomain>"` (defaults to Resend's onboarding address, which delivers to your own address only — verify a domain for production). Without the key, unverified signups/signins fail closed with a setup error; already-verified sessions keep working.
-- Legacy accounts created before verification landed verify once on their next sign-in (OTP step appears automatically).
 - Leaving is a soft delete (`status: "left"`): the row stays so historical expenses, balances, and reports keep resolving names. Left members are hidden from new splits/payers (server-enforced), settle to zero before leaving, and rejoin via Join or re-invite.
-- No email verification or password reset wired. Adding reset needs an email sender (e.g. Resend free tier) — ask if you want it.
+- Password reset is not wired. Email verification is required for unverified accounts; adding reset needs an email sender (e.g. Resend free tier).
 
 ## Offline mode
 
 Signed-in members can keep adding transactions with no connection. They queue on-device (localStorage) and sync automatically when back online.
 
 - Identity boundary: every queued op is stamped with its owning account and only ever replays *and renders* under that same session. Another account signing in on the same device neither syncs, sees, retries, nor discards your ops — the queue bar says whose they are until the owner returns.
-- Unstamped ops predate tracking and belong to nobody: they never auto-replay. The queue bar lists them for explicit Adopt (stamp to me — only if they're yours) or Discard recovery.
 - Sign-out flushes your pending ops while online; offline (or after a failed flush) it warns before signing out. Queued writes survive sign-outs and sync when you sign back in.
 - Attribution and membership always derive from the live session server-side — the stamp is routing-only and never trusted.
 
 - Works offline: add expense, edit expense, delete expense, record settle-up payment. Queued rows show a **queued** badge and count toward balances immediately.
-- Viewable offline: last saved copy of a previously opened group (members, expenses, balances, activity). A group never opened on the device shows an offline notice instead.
+- Viewable offline: last saved copy of a previously opened group (members, expenses, balances, activity). Member emails and account IDs are only restored for the account that saved them; guests and other accounts get the public member view. A group never opened on the device shows an offline notice instead.
 - Needs connection: group creation, member add/remove, invite-code rotation, sign-in itself.
 - Sync: auto-runs on reconnect/sign-in; or **Sync now** in the queue bar. Retried syncs are deduped by `clientId`, so a failed-then-retried add can never insert twice. Edits to a not-yet-synced add merge into it; deleting one just drops it.
 - Conflicts: if an op fails on replay (e.g. data changed meanwhile), it stays in the queue with the server error and **Retry** / **Discard** actions. Retrying a single op syncs pending ops too, in order.
-- Queue survives reloads and sign-outs; it syncs after the next sign-in.
+- Queue survives reloads and sign-outs; an operation interrupted while syncing is recovered to pending and retried after the next sign-in. Replayed deletes are safe if the server already completed the delete before the interruption.
 
 ## Deploy
 

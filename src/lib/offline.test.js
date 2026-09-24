@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
 import {
-  adoptOp,
   applyOutboxToExpenses,
   countPendingOps,
   dropOp,
@@ -87,8 +86,8 @@ describe("enqueue / filter", () => {
   });
 
   it("merges an update into a not-yet-synced add", () => {
-    const tempId = enqueueAdd(G, addEntry());
-    enqueueUpdate(G, tempId, { ...addEntry(), description: "Edited" });
+    const tempId = enqueueAdd(G, addEntry(), "u1");
+    enqueueUpdate(G, tempId, { ...addEntry(), description: "Edited" }, "u1");
     const ops = opsForGroup(G);
     expect(ops).toHaveLength(1);
     expect(ops[0].entry.description).toBe("Edited");
@@ -96,28 +95,28 @@ describe("enqueue / filter", () => {
   });
 
   it("queues an update for a server expense", () => {
-    enqueueUpdate(G, "exp-9", addEntry({ description: "Patch" }));
+    enqueueUpdate(G, "exp-9", addEntry({ description: "Patch" }), "u1");
     const ops = opsForGroup(G);
     expect(ops).toHaveLength(1);
     expect(ops[0].kind).toBe("update");
-    enqueueUpdate(G, "exp-9", addEntry({ description: "Patch2" }));
+    enqueueUpdate(G, "exp-9", addEntry({ description: "Patch2" }), "u1");
     expect(opsForGroup(G)).toHaveLength(1);
     expect(opsForGroup(G)[0].patch.description).toBe("Patch2");
   });
 
   it("drops a queued add on remove instead of queueing a remove", () => {
-    const tempId = enqueueAdd(G, addEntry());
-    expect(enqueueRemove(G, tempId)).toBe("dropped");
+    const tempId = enqueueAdd(G, addEntry(), "u1");
+    expect(enqueueRemove(G, tempId, "u1")).toBe("dropped");
     expect(opsForGroup(G)).toHaveLength(0);
   });
 
   it("queues a remove for a server expense and clears its pending update", () => {
-    enqueueUpdate(G, "exp-9", addEntry());
-    expect(enqueueRemove(G, "exp-9")).toBe("queued");
+    enqueueUpdate(G, "exp-9", addEntry(), "u1");
+    expect(enqueueRemove(G, "exp-9", "u1")).toBe("queued");
     const ops = opsForGroup(G);
     expect(ops).toHaveLength(1);
     expect(ops[0].kind).toBe("remove");
-    expect(enqueueRemove(G, "exp-9")).toBe("queued");
+    expect(enqueueRemove(G, "exp-9", "u1")).toBe("queued");
     expect(opsForGroup(G)).toHaveLength(1);
   });
 
@@ -138,7 +137,7 @@ describe("enqueue / filter", () => {
   it("notifies subscribers and exposes a hook", () => {
     const fn = vi.fn();
     const unsub = subscribeOutbox(fn);
-    enqueueAdd(G, addEntry());
+    enqueueAdd(G, addEntry(), "u1");
     expect(fn).toHaveBeenCalled();
     unsub();
     const { result } = renderHook(() => useOutbox());
@@ -158,7 +157,7 @@ describe("applyOutboxToExpenses", () => {
     { _id: "e2", description: "B", amountCents: 200, createdAt: 2 },
   ];
   it("layers adds, updates and removes over server rows", () => {
-    const t = enqueueAdd(G, { ...addEntry(), createdAt: 5 });
+    const t = enqueueAdd(G, { ...addEntry(), createdAt: 5 }, "u1");
     void t;
     const ops = getOutbox();
     const rows = applyOutboxToExpenses(base, ops);
@@ -167,8 +166,8 @@ describe("applyOutboxToExpenses", () => {
     expect(rows[0].createdAt).toBeGreaterThanOrEqual(rows[1].createdAt);
   });
   it("applies updates and hides removed rows", () => {
-    enqueueUpdate(G, "e1", { description: "A2" });
-    enqueueRemove(G, "e2");
+    enqueueUpdate(G, "e1", { description: "A2" }, "u1");
+    enqueueRemove(G, "e2", "u1");
     const rows = applyOutboxToExpenses(base, getOutbox());
     expect(rows.find((r) => r._id === "e2")).toBeUndefined();
     const e1 = rows.find((r) => r._id === "e1");
@@ -189,7 +188,7 @@ describe("snapshots", () => {  it("round-trips group data and caps sizes", () =>
   });
   it("returns null when missing or corrupt", () => {
     expect(loadSnapshot("nope")).toBeNull();
-    localStorage.setItem("fairsplit:snap:v1:x", "{broken");
+    localStorage.setItem("fairsplit:snap:v2:x", "{broken");
     expect(loadSnapshot("x")).toBeNull();
   });
 });
@@ -200,8 +199,7 @@ describe("identity boundary", () => {
     enqueueUpdate(G, "e9", addEntry(), "u1");
     enqueueRemove(G, "e8", "u1");
     for (const op of getOutbox()) expect(op.userId).toBe("u1");
-    enqueueAdd(G, addEntry());
-    expect(getOutbox().at(-1).userId).toBeNull();
+    expect(() => enqueueAdd(G, addEntry())).toThrow(/sign in/i);
   });
 
   it("routes ops by stamp, orphaning unstamped ones", () => {
@@ -216,7 +214,7 @@ describe("identity boundary", () => {
   it("counts and lists only my pending ops", () => {
     enqueueAdd(G, addEntry(), "u1");
     enqueueAdd(G, addEntry(), "u2");
-    enqueueAdd(G, addEntry());
+    enqueueAdd(G, addEntry(), "u1");
     const ops = getOutbox();
     expect(countPendingOps(ops, G, "u1")).toBe(1);
     expect(countPendingOps(ops, G, "u2")).toBe(1);
@@ -227,14 +225,4 @@ describe("identity boundary", () => {
     expect(pendingCountForGroup(G)).toBe(0); // unknown session replays nothing stamped
   });
 
-  it("adopts only unstamped ops, never another account's", () => {
-    enqueueAdd(G, addEntry());
-    enqueueAdd(G, addEntry(), "u2");
-    const [orphan, foreign] = getOutbox();
-    expect(adoptOp(orphan.opId, "u1")).toBe(true);
-    expect(adoptOp(foreign.opId, "u1")).toBe(false);
-    expect(adoptOp(orphan.opId, null)).toBe(false);
-    expect(getOutbox().find((o) => o.opId === orphan.opId).userId).toBe("u1");
-    expect(myPendingOps(getOutbox(), G, "u1")).toHaveLength(1);
-  });
 });

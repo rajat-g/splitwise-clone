@@ -230,7 +230,7 @@ export function AccountButton({ onSignIn }) {
   // offline. They stay queued for this account either way.
   const myUnsynced = (list) =>
     (list || []).filter(
-      (o) => (o.status === "pending" || o.status === "failed") && opBelongsTo(o, viewer?._id ?? null)
+      (o) => (o.status === "pending" || o.status === "syncing" || o.status === "failed") && opBelongsTo(o, viewer?._id ?? null)
     );
 
   const handleSignOut = async () => {

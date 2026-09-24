@@ -18,16 +18,11 @@ function memberKey(m) {
 }
 
 function expenseAmountCents(e) {
-  if (Number.isInteger(e.amountCents)) return e.amountCents;
-  return toCents(e.amount);
+  return e.amountCents;
 }
 
 function expenseSplitsCents(e) {
-  // Shape: [{ memberId, amountCents }]
-  if (Array.isArray(e.splits)) {
-    return e.splits.map((s) => ({ id: String(s.memberId), cents: s.amountCents }));
-  }
-  return Object.entries(e.splits || {}).map(([id, amt]) => ({ id: String(id), cents: toCents(amt) }));
+  return e.splits.map((s) => ({ id: String(s.memberId), cents: s.amountCents }));
 }
 
 export const CURRENCIES = ["$", "€", "£", "₹", "¥", "₩", "A$", "C$", "R$", "₺", "₽", "₴", "₦", "₱", "฿", "kr", "CHF", "zł"];
@@ -168,12 +163,7 @@ export function normalizeInviteCode(raw) {
 
 const SPLIT_MODE_LABELS = { equal: "Equal", exact: "Exact", percent: "%", shares: "Shares" };
 
-/** Human label for how an expense was split. Infers for docs saved before splitMode existed. */
+/** Human label for how an expense was split. */
 export function splitTypeLabel(e) {
-  const m = String(e?.splitMode ?? "").trim().toLowerCase();
-  if (SPLIT_MODE_LABELS[m]) return SPLIT_MODE_LABELS[m];
-  const splits = Array.isArray(e?.splits) ? e.splits : [];
-  if (splits.length <= 1) return "Equal";
-  const first = splits[0]?.amountCents;
-  return splits.every((s) => s.amountCents === first) ? "Equal" : "Custom";
+  return SPLIT_MODE_LABELS[e.splitMode];
 }

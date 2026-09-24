@@ -52,14 +52,19 @@ describe("wipe.wipeAll", () => {
       paidBy: members[0]._id,
       splits: [{ memberId: members[0]._id, amountCents: 1000 }],
       date: "2026-09-20",
+      category: "other",
+      splitMode: "equal",
       isSettlement: false,
     });
 
-    const counts = await t.mutation(internal.wipe.wipeAll, { confirm: "WIPE-EVERYTHING" });
-    expect(counts.groups).toBe(1);
-    expect(counts.members).toBe(1);
-    expect(counts.expenses).toBe(1);
-    expect(counts.users).toBe(1);
+    const { jobId } = await t.mutation(internal.wipe.wipeAll, { confirm: "WIPE-EVERYTHING" });
+    await t.finishAllScheduledFunctions(() => {});
+    const report = await t.query(internal.wipe.status, { jobId });
+    expect(report?.status).toBe("complete");
+    expect(report?.deleted.groups).toBe(1);
+    expect(report?.deleted.members).toBe(1);
+    expect(report?.deleted.expenses).toBe(1);
+    expect(report?.deleted.users).toBe(1);
     expect(await t.query(api.members.list, { publicId: g.publicId })).toEqual([]);
     expect(await allExpenses(t, g.publicId)).toEqual([]);
     expect(await t.query(api.users.viewer, {})).toBeNull();

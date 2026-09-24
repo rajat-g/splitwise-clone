@@ -115,28 +115,4 @@ describe("OutboxBar", () => {
     expect(onSync).toHaveBeenCalledTimes(1);
   });
 
-  it("offers adopt-or-discard recovery for unstamped orphans", () => {
-    const onAdopt = vi.fn();
-    const onDiscard = vi.fn();
-    const orphan = { opId: "o1", groupPublicId: "g", kind: "add", tempId: "tmp-1",
-      entry: { description: "Old", isSettlement: false }, status: "failed", error: "denied" };
-    render(
-      <OutboxBar items={[orphan]} userId="u1"
-        online syncing={false} onSync={() => {}} onRetry={() => {}} onDiscard={onDiscard} onAdopt={onAdopt} />
-    );
-    expect(screen.getByText(/pre-tracking queue/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Adopt" }));
-    expect(onAdopt).toHaveBeenCalledWith("o1");
-    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
-    expect(onDiscard).toHaveBeenCalledWith("o1");
-  });
-
-  it("hides adopt from guests but keeps discard", () => {
-    render(
-      <OutboxBar items={[{ opId: "o1", groupPublicId: "g", kind: "add", status: "pending", error: "" }]}
-        online syncing={false} onSync={() => {}} onRetry={() => {}} onDiscard={() => {}} onAdopt={() => {}} />
-    );
-    expect(screen.queryByRole("button", { name: "Adopt" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Discard" })).toBeInTheDocument();
-  });
 });

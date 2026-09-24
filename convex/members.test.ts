@@ -112,17 +112,7 @@ describe("members.add", () => {
     await expect(authed.mutation(api.members.add, { publicId: g.publicId, email: "a@b.co", name: "x".repeat(31) }))
       .rejects.toThrow(/under 30/i);
     await expect(authed.mutation(api.members.add, { publicId: g.publicId, email: " " }))
-      .rejects.toThrow(/member name is required/i);
-  });
-
-  it("supports the legacy name-only path with duplicate merging", async () => {
-    const { authed, t, g } = await setup();
-    const a = await authed.mutation(api.members.add, { publicId: g.publicId, name: "Maya" });
-    const b = await authed.mutation(api.members.add, { publicId: g.publicId, name: "maya" });
-    expect(b._id).toEqual(a._id);
-    await expect(authed.mutation(api.members.add, { publicId: g.publicId, name: "  " }))
-      .rejects.toThrow(/required/i);
-    expect(await t.query(api.members.list, { publicId: g.publicId })).toHaveLength(2);
+      .rejects.toThrow(/valid email/i);
   });
 
   it("rejects guests and unknown groups", async () => {
@@ -210,7 +200,7 @@ describe("members.claim", () => {
 describe("members.rename", () => {
   it("renames and blocks duplicates within the same email scope", async () => {
     const { authed, t, g } = await setup();
-    await authed.mutation(api.members.add, { publicId: g.publicId, name: "Maya" });
+    await authed.mutation(api.members.add, { publicId: g.publicId, name: "Maya", email: "maya@example.com" });
     const members = await t.query(api.members.list, { publicId: g.publicId });
     const maya = members.find((m) => m.name === "Maya")!;
     const renamed = await authed.mutation(api.members.rename, {
@@ -265,9 +255,11 @@ describe("members.remove", () => {
         { memberId: bo._id, amountCents: 5000 },
       ],
       date: "2026-09-20",
+      category: "other",
+      splitMode: "equal",
       isSettlement: false,
     });
-    await expect(authed.mutation(api.members.remove, { publicId: g.publicId, memberId: bo._id }))
+    await expect(authed.action(api.members.remove, { publicId: g.publicId, memberId: bo._id }))
       .rejects.toThrow(/non-zero balance/i);
 
     await authed.mutation(api.expenses.add, {
@@ -277,13 +269,15 @@ describe("members.remove", () => {
       paidBy: bo._id,
       splits: [{ memberId: creator._id, amountCents: 5000 }],
       date: "2026-09-21",
+      category: "other",
+      splitMode: "equal",
       isSettlement: true,
     });
-    await authed.mutation(api.members.remove, { publicId: g.publicId, memberId: bo._id });
+    await authed.action(api.members.remove, { publicId: g.publicId, memberId: bo._id });
     members = await authed.query(api.members.list, { publicId: g.publicId });
     // Soft delete: the row stays (history keeps resolving) with status left.
     expect(members.find((m) => "email" in m && m.email === "bo@example.com")).toMatchObject({ status: "left" });
-    await expect(authed.mutation(api.members.remove, { publicId: g.publicId, memberId: bo._id }))
+    await expect(authed.action(api.members.remove, { publicId: g.publicId, memberId: bo._id }))
       .rejects.toThrow(/already left/i);
   });
 
@@ -292,7 +286,7 @@ describe("members.remove", () => {
     const other = await seedGroup(authed, { name: "Other group" });
     const [outsider] = await t.query(api.members.list, { publicId: other.publicId });
     await expect(
-      authed.mutation(api.members.remove, { publicId: g.publicId, memberId: outsider._id })
+      authed.action(api.members.remove, { publicId: g.publicId, memberId: outsider._id })
     ).rejects.toThrow(/not found/i);
   });
 });

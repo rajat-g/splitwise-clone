@@ -1,13 +1,13 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
-import { useConvex, useConvexAuth, useMutation, usePaginatedQuery, useQuery } from "convex/react";
+import { useAction, useConvex, useConvexAuth, useMutation, usePaginatedQuery, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { computeBalances, simplifyDebts, fmt, toCents, splitsMapToArray, expenseToForm, fromCents, formatInviteCode, localDateString } from "../lib/split";
 import { EXPENSE_CATEGORIES, categoryLabel, categoryTone, normalizeCategory } from "../lib/categories";
 import { getDeviceId, saveRecentGroup } from "../lib/identity";
 import { useOnline } from "../lib/useOnline";
 import {
-  adoptOp, applyOutboxToExpenses, countPendingOps, dropOp, enqueueAdd, enqueueRemove, enqueueUpdate,
+  applyOutboxToExpenses, countPendingOps, dropOp, enqueueAdd, enqueueRemove, enqueueUpdate,
   filterGroupOps, loadSnapshot, newOpId, opBelongsTo, retryOp, saveSnapshot, useOutbox,
 } from "../lib/offline";
 import { syncOutbox } from "../lib/sync";
@@ -80,7 +80,7 @@ function validateInvite(emailRaw, tempRaw, membersList) {
     if (/[\n\r\t]/.test(temp)) return "Temp names can't contain line breaks or tabs.";
   }
   const duplicate = membersList.find((m) => memberEmail(m) === email);
-  if (duplicate && duplicate.status !== "left") return `${email} is already in this group.`;
+  if (duplicate && duplicate.status === "active") return `${email} is already in this group.`;
   if (!duplicate && membersList.length >= MAX_MEMBERS_PER_GROUP) return `Groups are capped at ${MAX_MEMBERS_PER_GROUP} members.`;
   return "";
 }
@@ -100,7 +100,7 @@ export default function GroupPage() {
 
   const addMember = useMutation(api.members.add);
   const renameMember = useMutation(api.members.rename);
-  const removeMemberM = useMutation(api.members.remove);
+  const removeMemberM = useAction(api.members.remove);
   const claimInvite = useMutation(api.members.claim);
   const joinGroupM = useMutation(api.members.join);
   const addExpense = useMutation(api.expenses.add);
@@ -154,7 +154,10 @@ export default function GroupPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [allOps, publicId, viewer?._id]
   );
-  const snapForRender = useMemo(() => (!online ? loadSnapshot(publicId) : null), [online, publicId]);
+  const snapForRender = useMemo(
+    () => (!online ? loadSnapshot(publicId, viewer?._id ?? null) : null),
+    [online, publicId, viewer?._id]
+  );
   const visibleExpenses = useMemo(
     () => applyOutboxToExpenses(expenses ?? snapForRender?.expenses ?? [], myGroupOps),
     [expenses, snapForRender, myGroupOps]
@@ -180,9 +183,13 @@ export default function GroupPage() {
           ownerUserId: group.ownerUserId,
         },
         members, expenses, activity,
-      });
+      }, viewer?._id ?? null);
     }
-  }, [publicId, group, members, expenses, activity]);
+  }, [publicId, group, members, expenses, activity, viewer?._id]);
+
+  useEffect(() => {
+    if (group) saveRecentGroup({ id: publicId, name: group.name, inviteCode: group.inviteCode });
+  }, [publicId, group]);
 
   const runSync = useCallback(async ({ includeFailed = false } = {}) => {
     if (!online || !isAuthenticated || syncing) return { synced: 0, total: 0 };
@@ -237,6 +244,14 @@ export default function GroupPage() {
       return false;
     }
     return true;
+  };
+
+  const requireQueueIdentity = () => {
+    if (!viewer?._id) {
+      setError("Your account is still loading. Try again in a moment.");
+      return null;
+    }
+    return viewer._id;
   };
 
   const waitingServer = group === undefined || members === undefined || expenses === undefined;
@@ -302,22 +317,20 @@ export default function GroupPage() {
   const renderMembers = visibleMembers;
   const renderActivity = activity ?? snapForRender?.activity ?? [];
 
-  saveRecentGroup({ id: publicId, name: renderGroup.name, inviteCode: renderGroup.inviteCode });
-
   const currency = renderGroup.currency || "$";
   const inviteLink = `${window.location.origin}/g/${publicId}`;
   // "You" in this group: the member linked to your account, or a pending
   // invite matching your email (before the claim mutation lands). Left
   // members don't count — rejoin to write again.
   const viewerMember = viewer
-    ? (renderMembers.find((m) => m.userId && String(m.userId) === String(viewer._id) && m.status !== "left")
+    ? (renderMembers.find((m) => m.userId && String(m.userId) === String(viewer._id) && m.status === "active")
       ?? renderMembers.find(
         (m) => viewer.email && memberEmail(m) && memberEmail(m) === String(viewer.email).trim().toLowerCase()
-          && m.status !== "left"
+          && m.status === "active"
       ) ?? null)
     : null;
   // Active members transact; left members stay visible so history keeps names.
-  const activeMembers = renderMembers.filter((m) => m.status !== "left");
+  const activeMembers = renderMembers.filter((m) => m.status === "active");
   // Write access = linked membership in THIS group. Signed-in outsiders with
   // the link can view everything but must join before they can transact.
   // The server re-checks membership on every mutation — this only gates UI.
@@ -347,16 +360,17 @@ export default function GroupPage() {
     const amountCents = toCents(data.amount);
     const splits = splitsMapToArray(data.splits);
     const category = normalizeCategory(data.category);
-    const splitMode = ["equal", "exact", "percent", "shares"].includes(String(data.splitMode))
-      ? String(data.splitMode) : "equal";
+    const splitMode = data.splitMode;
     if (!online) {
+      const userId = requireQueueIdentity();
+      if (!userId) return;
       // Queue for sync: edits to a queued add merge into it.
       const entry = {
         description: data.description, amountCents, paidBy: data.paidBy,
         splits, date: data.date, category, splitMode, isSettlement: false,
       };
-      if (editing) enqueueUpdate(publicId, String(editing._id), entry, viewer?._id ?? null);
-      else enqueueAdd(publicId, entry, viewer?._id ?? null);
+      if (editing) enqueueUpdate(publicId, String(editing._id), entry, userId);
+      else enqueueAdd(publicId, entry, userId);
       setShowExpense(false); setEditing(null);
       return;
     }
@@ -390,10 +404,14 @@ export default function GroupPage() {
       amountCents, paidBy: from,
       splits: [{ memberId: to, amountCents }],
       date: localDateString(),
+      category: "other",
+      splitMode: "equal",
       isSettlement: true,
     };
     if (!online) {
-      enqueueAdd(publicId, entry, viewer?._id ?? null);
+      const userId = requireQueueIdentity();
+      if (!userId) return;
+      enqueueAdd(publicId, entry, userId);
       closeSettle();
       return;
     }
@@ -410,7 +428,9 @@ export default function GroupPage() {
     if (!requireAccount()) return;
     if (!confirm(`Delete “${e.description}”? Everyone will see it removed.`)) return;
     if (!online) {
-      enqueueRemove(publicId, String(e._id), viewer?._id ?? null);
+      const userId = requireQueueIdentity();
+      if (!userId) return;
+      enqueueRemove(publicId, String(e._id), userId);
       return;
     }
     deleteExpense({ publicId, expenseId: e._id }).catch((err) => setError(err.message));
@@ -575,7 +595,6 @@ export default function GroupPage() {
         onSync={() => runSync({ includeFailed: true })}
         onRetry={(opId) => { retryOp(opId); runSync({ includeFailed: true }); }}
         onDiscard={(opId) => dropOp(opId)}
-        onAdopt={(opId) => adoptOp(opId, viewer?._id ?? null)}
       />
       <div className="group-dashboard">
       {/* Group overview and section navigation */}
@@ -882,7 +901,7 @@ export default function GroupPage() {
                 // Settle shortcut: member pays/is-paid against someone on the
                 // other side of zero; falls back to any other member.
                 // Left members never transact, so they stay out of both.
-                const others = renderMembers.filter((x) => String(x._id ?? x.id) !== id && x.status !== "left");
+                const others = renderMembers.filter((x) => String(x._id ?? x.id) !== id && x.status === "active");
                 const counterpart = Math.abs(b) >= 0.005
                   ? (others.find((x) => (b < 0 ? (balances[mid(x)] || 0) > 0.005 : (balances[mid(x)] || 0) < -0.005)) ?? others[0] ?? null)
                   : null;
@@ -907,8 +926,8 @@ export default function GroupPage() {
                             <span className="truncate">{displayOf(m)}</span>
                             {isYou && <Badge tone="teal" className="!px-1.5 !py-0.5 !text-[10px]">you</Badge>}
                             {!isYou && m.status === "left" && <Badge tone="neutral" className="!px-1.5 !py-0.5 !text-[10px]">left</Badge>}
-                            {!isYou && m.status !== "left" && isPendingInvite(m) && <Badge tone="amber" className="!px-1.5 !py-0.5 !text-[10px]">invited</Badge>}
-                            {!isYou && m.status !== "left" && !isPendingInvite(m) && memberEmail(m) && <Badge tone="emerald" className="!px-1.5 !py-0.5 !text-[10px]">joined</Badge>}
+                            {!isYou && m.status === "active" && isPendingInvite(m) && <Badge tone="amber" className="!px-1.5 !py-0.5 !text-[10px]">invited</Badge>}
+                            {!isYou && m.status === "active" && !isPendingInvite(m) && memberEmail(m) && <Badge tone="emerald" className="!px-1.5 !py-0.5 !text-[10px]">joined</Badge>}
                           </span>
                           <span className="mt-0.5 block truncate text-xs text-slate-400 dark:text-slate-500">
                             {memberEmail(m) && displayOf(m) !== memberEmail(m)
@@ -921,7 +940,7 @@ export default function GroupPage() {
                               : <span> · added {timeAgo(m.createdAt)}</span>}
                           </span>
                         </span>
-                        {isMember && m.status !== "left" && (
+                        {isMember && m.status === "active" && (
                           <span className="flex shrink-0 items-center gap-1">
                             <button aria-label={`Rename ${displayOf(m)}`} title={memberEmail(m) ? `Rename display name (email stays ${memberEmail(m)})` : "Rename"}
                               onClick={() => startRename(m)}

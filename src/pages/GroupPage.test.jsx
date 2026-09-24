@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockUseQuery = vi.hoisted(() => vi.fn());
 const mockUseMutation = vi.hoisted(() => vi.fn());
+const mockUseAction = vi.hoisted(() => vi.fn());
 const mockUseConvexAuth = vi.hoisted(() => vi.fn());
 const mockUseConvex = vi.hoisted(() => vi.fn());
 
@@ -13,6 +14,7 @@ vi.mock("convex/react", () => ({
     loadMore: vi.fn(),
   }),
   useMutation: (...args) => mockUseMutation(...args),
+  useAction: (...args) => mockUseAction(...args),
   useConvex: (...args) => mockUseConvex(...args),
   useConvexAuth: (...args) => mockUseConvexAuth(...args),
   ConvexReactClient: vi.fn(),
@@ -92,6 +94,9 @@ beforeEach(() => {
       case "members:claim": return mutations.claimInvite;
       default: return vi.fn();
     }
+  });
+  mockUseAction.mockReset().mockImplementation((ref) => {
+    return fname(ref) === "members:remove" ? mutations.removeMember : vi.fn();
   });
   mockUseQuery.mockReset().mockImplementation((ref) => {
     switch (fname(ref)) {

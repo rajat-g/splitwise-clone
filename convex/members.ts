@@ -1,5 +1,7 @@
+import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
@@ -63,7 +65,7 @@ export const list = query({
     groupId: v.id("groups"),
     name: v.string(),
     email: v.optional(v.string()),
-    status: v.optional(v.string()),
+    status: v.union(v.literal("active"), v.literal("left")),
     userId: v.optional(v.id("users")),
     createdAt: v.number(),
   })),
@@ -106,10 +108,9 @@ const MAX_MEMBERS_PER_GROUP = 50;
 export const add = mutation({
   args: {
     publicId: v.string(),
-    // New email-invite flow: email required, name = optional temp display name.
-    // Legacy callers send only { name } — still supported for name-only members.
+    // Email invite flow: email required, name = optional temp display name.
     name: v.optional(v.string()),
-    email: v.optional(v.string()),
+    email: v.string(),
     deviceId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -120,83 +121,54 @@ export const add = mutation({
     await requireGroupMember(ctx, g._id);
     const existing = await ctx.db.query("members").withIndex("by_group", (q) => q.eq("groupId", g._id)).collect();
 
-    const rawEmail = String(args.email ?? "").trim();
+    const email = cleanEmail(args.email);
     const rawName = String(args.name ?? "").trim();
-
-    // --- Email-invite path ---
-    if (rawEmail) {
-      const email = cleanEmail(rawEmail);
-      let tempName = "";
-      if (rawName) {
-        tempName = cleanMemberName(rawName);
-        if (tempName.toLowerCase() === email.toLowerCase()) tempName = "";
-      }
-      // Already invited? Return the existing row (idempotent) — reactivating
-      // it when it belongs to someone who left.
-      const dupEmail = existing.find((m) => typeof m.email === "string" && emailsEqual(m.email, email));
-      if (dupEmail) {
-        if (isLeft(dupEmail)) {
-          const name = tempName || dupEmail.name;
-          await ctx.db.patch(dupEmail._id, { status: "active", ...(tempName ? { name: tempName } : {}) });
-          const now = Date.now();
-          await ctx.db.insert("activity", {
-            groupId: g._id, type: "member_joined",
-            text: `${name} rejoined the group`,
-            actorName: name, createdAt: now,
-          });
-          return { _id: dupEmail._id, name };
-        }
-        return { _id: dupEmail._id, name: dupEmail.name };
-      }
-
-      // If this email already has a VERIFIED account, link it now and show
-      // their real name. Unverified matches stay pending: an unproven email
-      // string must never confer membership.
-      const linkedUser = await findUserByEmail(ctx, email);
-      const linkedUserId = linkedUser && userEmailVerified(linkedUser) ? linkedUser._id : null;
-      // No temp name? Fall back to the email prefix ("priya"), never the
-      // full address — the row subtitle already shows the email, and claim
-      // upgrades prefix displays to the real name on signup.
-      const display = linkedUserId && linkedUser
-        ? profileNameOf(linkedUser, email)
-        : tempName || email.split("@")[0] || email;
-
-      const now = Date.now();
-      const doc = {
-        groupId: g._id, name: display, email, createdAt: now,
-        ...(args.deviceId ? { deviceId: args.deviceId } : {}),
-        ...(linkedUserId ? { userId: linkedUserId } : {}),
-      };
-      if (existing.length >= MAX_MEMBERS_PER_GROUP) throw new Error(`Groups are capped at ${MAX_MEMBERS_PER_GROUP} members.`);
-      const _id = await ctx.db.insert("members", doc);
-      await ctx.db.insert("activity", {
-        groupId: g._id, type: "member_added",
-        text: linkedUserId ? `${display} joined the group` : `${display} was invited`,
-        actorName: display, createdAt: now,
-      });
-      return { _id, name: display };
+    let tempName = "";
+    if (rawName) {
+      tempName = cleanMemberName(rawName);
+      if (tempName.toLowerCase() === email.toLowerCase()) tempName = "";
     }
-
-    // --- Legacy name-only path (no email) ---
-    const name = cleanMemberName(rawName);
-    const dup = existing.find((m) => m.name.toLowerCase() === name.toLowerCase());
-    if (dup) {
-      if (isLeft(dup)) {
-        await ctx.db.patch(dup._id, { status: "active" });
+    // Already invited? Return the existing row (idempotent), reactivating it
+    // when its member has left.
+    const dupEmail = existing.find((m) => typeof m.email === "string" && emailsEqual(m.email, email));
+    if (dupEmail) {
+      if (isLeft(dupEmail)) {
+        const name = tempName || dupEmail.name;
+        await ctx.db.patch(dupEmail._id, { status: "active", ...(tempName ? { name: tempName } : {}) });
+        const now = Date.now();
         await ctx.db.insert("activity", {
           groupId: g._id, type: "member_joined",
-          text: `${dup.name} rejoined the group`, actorName: dup.name, createdAt: Date.now(),
+          text: `${name} rejoined the group`,
+          actorName: name, createdAt: now,
         });
+        return { _id: dupEmail._id, name };
       }
-      return { _id: dup._id, name: dup.name };
+      return { _id: dupEmail._id, name: dupEmail.name };
     }
-    if (existing.length >= MAX_MEMBERS_PER_GROUP) throw new Error(`Groups are capped at ${MAX_MEMBERS_PER_GROUP} members.`);
+
+    // If this email already has a verified account, link it and show their
+    // real name. An unverified address stays a pending invite.
+    const linkedUser = await findUserByEmail(ctx, email);
+    const linkedUserId = linkedUser && userEmailVerified(linkedUser) ? linkedUser._id : null;
+    // No temporary name? Use the email prefix, never the full address.
+    const display = linkedUserId && linkedUser
+      ? profileNameOf(linkedUser, email)
+      : tempName || email.split("@")[0] || email;
+
     const now = Date.now();
-    const _id = await ctx.db.insert("members", { groupId: g._id, name, deviceId: args.deviceId, createdAt: now });
+    const doc = {
+      groupId: g._id, name: display, email, status: "active" as const, createdAt: now,
+      ...(args.deviceId ? { deviceId: args.deviceId } : {}),
+      ...(linkedUserId ? { userId: linkedUserId } : {}),
+    };
+    if (existing.length >= MAX_MEMBERS_PER_GROUP) throw new Error(`Groups are capped at ${MAX_MEMBERS_PER_GROUP} members.`);
+    const _id = await ctx.db.insert("members", doc);
     await ctx.db.insert("activity", {
-      groupId: g._id, type: "member_added", text: `${name} joined the group`, actorName: name, createdAt: now,
+      groupId: g._id, type: "member_added",
+      text: linkedUserId ? `${display} joined the group` : `${display} was invited`,
+      actorName: display, createdAt: now,
     });
-    return { _id, name };
+    return { _id, name: display };
   },
 });
 
@@ -238,7 +210,7 @@ export const join = mutation({
       );
       if (pending) {
         const pEmail = (pending.email ?? "").toLowerCase();
-        const patch: { userId: Id<"users">; status: string; name?: string } = { userId, status: "active" };
+        const patch: { userId: Id<"users">; status: "active"; name?: string } = { userId, status: "active" };
         if (!pending.name || pending.name === pEmail || pending.name === pEmail.split("@")[0]) {
           patch.name = realName;
         }
@@ -258,6 +230,7 @@ export const join = mutation({
     const now = Date.now();
     const doc = {
       groupId: g._id, name: realName, createdAt: now, userId,
+      status: "active" as const,
       ...(email ? { email } : {}),
       ...(args.deviceId ? { deviceId: args.deviceId } : {}),
     };
@@ -273,7 +246,7 @@ export const join = mutation({
 /**
  * Claim pending email invites for the signed-in user, scoped to this group.
  * Call it when opening the group: if viewer.email matches a member.email
- * without userId, link it and swap the email-fallback display for the real
+ * without userId, link it and swap the temporary email-based display for the real
  * profile name. Idempotent — safe to call on every open.
  */
 export const claim = mutation({
@@ -286,7 +259,7 @@ export const claim = mutation({
     const email = (user.email ?? "").trim().toLowerCase();
     if (!email || !EMAIL_RE.test(email)) return { claimed: 0 };
     // Linking by email string requires mailbox proof — unverified accounts
-    // (including legacy never-verified ones) must verify first.
+    // must verify first.
     if (!userEmailVerified(user)) return { claimed: 0 };
     const realName = profileNameOf(user, email);
 
@@ -296,7 +269,7 @@ export const claim = mutation({
       const mEmail = (m.email ?? "").trim().toLowerCase();
       if (!mEmail || mEmail !== email) continue;
       if (m.userId !== undefined && m.userId === userId) {
-        // Already linked — still upgrade an email-fallback display name.
+        // Already linked — still upgrade a temporary email-based display name.
         if (m.name === mEmail || m.name === mEmail.split("@")[0]) {
           await ctx.db.patch(m._id, { name: realName });
           claimed += 1;
@@ -304,7 +277,7 @@ export const claim = mutation({
         continue;
       }
       if (m.userId !== undefined) continue; // claimed by someone else
-      const patch: { userId: Id<"users">; status: string; name?: string } = { userId, status: "active" };
+      const patch: { userId: Id<"users">; status: "active"; name?: string } = { userId, status: "active" };
       // No custom temp name? Show the real name now (clean UI).
       if (!m.name || m.name === mEmail || m.name === mEmail.split("@")[0] || m.name.toLowerCase() === mEmail) {
         patch.name = realName;
@@ -334,8 +307,7 @@ export const rename = mutation({
     if (name === member.name) return { _id: member._id, name: member.name };
     const existing = await ctx.db.query("members").withIndex("by_group", (q) => q.eq("groupId", g._id)).collect();
     // Same display name is OK when rows are distinct email invites (the email
-    // subtitle disambiguates). It stays blocked for legacy name-only rows and
-    // for rows sharing the same email.
+    // subtitle disambiguates), and blocked for rows sharing the same email.
     const memberEmail = (member.email ?? "").toLowerCase();
     const dup = existing.find((m) => {
       if (m._id === args.memberId) return false;
@@ -356,37 +328,74 @@ export const rename = mutation({
   },
 });
 
-export const remove = mutation({
-  args: { publicId: v.string(), memberId: v.id("members") },
+const REMOVE_PAGE_SIZE = 500;
+
+/** Read one bounded ledger page while checking that the caller is a member. */
+export const removeBalancePage = internalQuery({
+  args: {
+    publicId: v.string(),
+    memberId: v.id("members"),
+    paginationOpts: paginationOptsValidator,
+  },
+  returns: v.object({
+    revision: v.number(),
+    balanceCents: v.number(),
+    isDone: v.boolean(),
+    continueCursor: v.string(),
+  }),
   handler: async (ctx, args) => {
-    await requireAuth(ctx);
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("Sign in to make changes. Guests can view only.");
+    const g = await ctx.db.query("groups")
+      .withIndex("by_publicId", (q) => q.eq("publicId", args.publicId)).first();
+    if (!g) throw new Error("Group not found. Check your invite link.");
+    const linkedMembers = await ctx.db.query("members")
+      .withIndex("by_group", (q) => q.eq("groupId", g._id)).collect();
+    if (!linkedMembers.some((m) => m.userId === userId && !isLeft(m))) {
+      throw new Error("You are not a member of this group. Join it first to make changes.");
+    }
+    const member = await ctx.db.get(args.memberId);
+    if (!member || member.groupId !== g._id) throw new Error("Member not found in this group.");
+    const page = await ctx.db.query("expenses")
+      .withIndex("by_group", (q) => q.eq("groupId", g._id))
+      .order("asc")
+      .paginate(args.paginationOpts);
+    let balanceCents = 0;
+    for (const expense of page.page) {
+      if (expense.paidBy === args.memberId) balanceCents += expense.amountCents;
+      for (const split of expense.splits) {
+        if (split.memberId === args.memberId) balanceCents -= split.amountCents;
+      }
+    }
+    return {
+      revision: g.ledgerRevision,
+      balanceCents,
+      isDone: page.isDone,
+      continueCursor: page.continueCursor,
+    };
+  },
+});
+
+/** Commit the removal only if no ledger write occurred during the page scan. */
+export const finishRemove = internalMutation({
+  args: {
+    publicId: v.string(),
+    memberId: v.id("members"),
+    expectedRevision: v.number(),
+    balanceCents: v.number(),
+  },
+  returns: v.object({ ok: v.boolean() }),
+  handler: async (ctx, args) => {
     const g = await groupByPublicId(ctx, args.publicId);
     const { userId: callerId } = await requireGroupMember(ctx, g._id);
-    const actor = await resolveActorName(ctx);
     const member = await ctx.db.get(args.memberId);
     if (!member || member.groupId !== g._id) throw new Error("Member not found in this group.");
     if (isLeft(member)) throw new Error(`${member.name} already left the group.`);
-
-    // PROPER BACKEND VALIDATION: compute balances server-side in cents.
-    // Refuse to remove anyone with a non-zero balance — no client trust.
-    const expenses = await ctx.db.query("expenses").withIndex("by_group", (q) => q.eq("groupId", g._id)).collect();
-    let bal = 0;
-    for (const e of expenses) {
-      if (e.isSettlement) {
-        if (e.paidBy === args.memberId) bal += e.amountCents;
-        const recv = e.splits[0];
-        if (recv && recv.memberId === args.memberId) bal -= recv.amountCents;
-      } else {
-        if (e.paidBy === args.memberId) bal += e.amountCents;
-        for (const s of e.splits) {
-          if (s.memberId === args.memberId) bal -= s.amountCents;
-        }
-      }
+    if (g.ledgerRevision !== args.expectedRevision) {
+      throw new Error("The ledger changed during this check. Please try removing the member again.");
     }
-    if (bal !== 0) throw new Error(`${member.name} has a non-zero balance. Settle up before removing.`);
-    // Soft delete: the row stays so historical expenses keep resolving names.
-    // Only active members transact — the UI hides left members from new
-    // splits and the server rejects them there.
+    if (args.balanceCents !== 0) throw new Error(`${member.name} has a non-zero balance. Settle up before removing.`);
+    const actor = await resolveActorName(ctx);
     const self = member.userId !== undefined && member.userId === callerId;
     await ctx.db.patch(args.memberId, { status: "left" });
     await ctx.db.insert("activity", {
@@ -395,5 +404,44 @@ export const remove = mutation({
       actorName: actor, createdAt: Date.now(),
     });
     return { ok: true };
+  },
+});
+
+/** Paginate the ledger in separate read transactions, then commit atomically. */
+export const remove = action({
+  args: { publicId: v.string(), memberId: v.id("members") },
+  returns: v.object({ ok: v.boolean() }),
+  handler: async (ctx, args) => {
+    if (!(await ctx.auth.getUserIdentity())) throw new Error("Sign in to make changes. Guests can view only.");
+    for (let attempt = 0; attempt < 3; attempt++) {
+      let cursor: string | null = null;
+      let revision: number | undefined;
+      let balanceCents = 0;
+      let changed = false;
+      for (;;) {
+        const result: {
+          revision: number;
+          balanceCents: number;
+          isDone: boolean;
+          continueCursor: string;
+        } = await ctx.runQuery(internal.members.removeBalancePage, {
+          ...args,
+          paginationOpts: { numItems: REMOVE_PAGE_SIZE, cursor },
+        });
+        if (revision === undefined) revision = result.revision;
+        else if (revision !== result.revision) { changed = true; break; }
+        balanceCents += result.balanceCents;
+        if (result.isDone) break;
+        cursor = result.continueCursor;
+      }
+      if (changed) continue;
+      const completed: { ok: boolean } = await ctx.runMutation(internal.members.finishRemove, {
+        ...args,
+        expectedRevision: revision ?? 0,
+        balanceCents,
+      });
+      return completed;
+    }
+    throw new Error("The ledger is changing too quickly to check safely. Please try again.");
   },
 });

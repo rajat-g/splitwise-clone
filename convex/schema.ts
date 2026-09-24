@@ -11,7 +11,10 @@ export default defineSchema({
     inviteCode: v.string(), // 10-char human-typed code (see groups.ts)
     createdByName: v.string(),
     createdAt: v.number(),
-    ownerUserId: v.optional(v.id("users")),
+    ownerUserId: v.id("users"),
+    // Incremented with every expense insert/edit/delete. Long-running member
+    // balance checks use it to reject a stale paginated ledger snapshot.
+    ledgerRevision: v.number(),
   })
     .index("by_publicId", ["publicId"])
     .index("by_inviteCode", ["inviteCode"])
@@ -19,11 +22,10 @@ export default defineSchema({
 
   members: defineTable({
     groupId: v.id("groups"),
-    name: v.string(), // display name: temp name, real profile name, or email fallback
-    email: v.optional(v.string()), // lowercased invite email; empty for legacy name-only members
-    // Soft delete: "left" members stay in history so expenses keep resolving
-    // names; only "active" members transact. Absent = active (legacy rows).
-    status: v.optional(v.string()),
+    name: v.string(), // display name: temp name, real profile name, or email prefix
+    email: v.optional(v.string()), // lowercased invite email; profile email can be unavailable
+    // Soft delete: left members stay in history; active members can transact.
+    status: v.union(v.literal("active"), v.literal("left")),
     deviceId: v.optional(v.string()),
     userId: v.optional(v.id("users")), // set when the member is created by/for the signed-in user
     createdAt: v.number(),
@@ -36,8 +38,8 @@ export default defineSchema({
     paidBy: v.id("members"),
     splits: v.array(v.object({ memberId: v.id("members"), amountCents: v.number() })),
     date: v.string(),
-    category: v.optional(v.string()), // e.g. "food" — see EXPENSE_CATEGORIES in src/lib/categories.js
-    splitMode: v.optional(v.string()), // "equal" | "exact" | "percent" | "shares" — how the expense was split
+    category: v.string(), // e.g. "food" — see EXPENSE_CATEGORIES in src/lib/categories.js
+    splitMode: v.string(), // "equal" | "exact" | "percent" | "shares" — how the expense was split
     isSettlement: v.boolean(),
     createdByName: v.string(),
     createdAt: v.number(),
@@ -45,6 +47,14 @@ export default defineSchema({
     clientId: v.optional(v.string()), // offline-sync dedup key (uuid per queued op)
   }).index("by_group", ["groupId"])
     .index("by_clientId", ["clientId"]),
+
+  // Tracks the resumable, admin-only database wipe across bounded mutations.
+  wipeJobs: defineTable({
+    requestedAt: v.number(),
+    status: v.union(v.literal("running"), v.literal("complete")),
+    tableIndex: v.number(),
+    deleted: v.record(v.string(), v.number()),
+  }),
 
   activity: defineTable({
     groupId: v.id("groups"),

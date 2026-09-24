@@ -82,10 +82,11 @@ export const create = mutation({
     const ownerEmail = (owner?.email ?? "").trim().toLowerCase() || undefined;
     const groupId = await ctx.db.insert("groups", {
       publicId, name, currency: args.currency, inviteCode,
-      createdByName: creatorName, createdAt: now, ownerUserId,
+      createdByName: creatorName, createdAt: now, ownerUserId, ledgerRevision: 0,
     });
     await ctx.db.insert("members", {
       groupId, name: creatorName, userId: ownerUserId,
+      status: "active",
       ...(args.deviceId ? { deviceId: args.deviceId } : {}),
       ...(ownerEmail ? { email: ownerEmail } : {}),
       createdAt: now,
@@ -110,7 +111,7 @@ export const getByPublicId = query({
     const viewerId = await getAuthUserId(ctx);
     return {
       _id: g._id, publicId: g.publicId, name: g.name, currency: g.currency, inviteCode: g.inviteCode,
-      ...(viewerId && g.ownerUserId ? { ownerUserId: g.ownerUserId } : {}),
+      ...(viewerId ? { ownerUserId: g.ownerUserId } : {}),
     };
   },
 });
@@ -153,7 +154,7 @@ export const myGroups = query({
 /**
  * Revoke a leaked/guessed code and issue a fresh one. OWNER ONLY — any
  * member can invite and transact, but sharing settings belong to the owner.
- * (Ownerless legacy groups fall back to any linked member.)
+ * Owner controls are only available to the account that created the group.
  */
 export const rotateCode = mutation({
   args: { publicId: v.string() },

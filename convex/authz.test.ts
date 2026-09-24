@@ -33,6 +33,8 @@ describe("outsiders cannot write", () => {
       paidBy: creator._id,
       splits: [{ memberId: creator._id, amountCents: 100 }],
       date: "2026-09-20",
+      category: "other",
+      splitMode: "equal",
       isSettlement: false,
     };
     await expect(mallory.mutation(api.expenses.add, payload)).rejects.toThrow(/not a member/i);
@@ -41,6 +43,8 @@ describe("outsiders cannot write", () => {
     await expect(mallory.mutation(api.expenses.update, {
       publicId: g.publicId, expenseId: _id, description: "X", amountCents: 100,
       paidBy: creator._id, splits: [{ memberId: creator._id, amountCents: 100 }], date: "2026-09-20",
+      category: "other",
+      splitMode: "equal",
     })).rejects.toThrow(/not a member/i);
     await expect(mallory.mutation(api.expenses.remove, { publicId: g.publicId, expenseId: _id }))
       .rejects.toThrow(/not a member/i);
@@ -55,7 +59,7 @@ describe("outsiders cannot write", () => {
     await expect(mallory.mutation(api.members.rename, {
       publicId: g.publicId, memberId: creator._id, name: "Pwned",
     })).rejects.toThrow(/not a member/i);
-    await expect(mallory.mutation(api.members.remove, { publicId: g.publicId, memberId: creator._id }))
+    await expect(mallory.action(api.members.remove, { publicId: g.publicId, memberId: creator._id }))
       .rejects.toThrow(/not a member/i);
     expect((await t.query(api.members.list, { publicId: g.publicId })).map((m) => m.name))
       .toEqual(["Alice"]);
@@ -91,7 +95,7 @@ describe("members can transact but not rotate", () => {
     const { _id } = await mallory.mutation(api.expenses.add, {
       publicId: g.publicId, description: "Lunch", amountCents: 200,
       paidBy: malloryRow._id, splits: [{ memberId: malloryRow._id, amountCents: 200 }],
-      date: "2026-09-20", isSettlement: false,
+      date: "2026-09-20", category: "other", splitMode: "equal", isSettlement: false,
     });
     expect(_id).toBeTruthy();
 
@@ -101,7 +105,7 @@ describe("members can transact but not rotate", () => {
     await mallory.mutation(api.members.rename, {
       publicId: g.publicId, memberId: newbie._id, name: "Newcomer",
     });
-    await mallory.mutation(api.members.remove, { publicId: g.publicId, memberId: newbie._id });
+    await mallory.action(api.members.remove, { publicId: g.publicId, memberId: newbie._id });
     members = await mallory.query(api.members.list, { publicId: g.publicId });
     expect(members.find((m) => "email" in m && m.email === "newbie@x.co")).toMatchObject({ status: "left" });
     void alice;
@@ -134,7 +138,7 @@ describe("members.join", () => {
     const { _id } = await mallory.mutation(api.expenses.add, {
       publicId: g.publicId, description: "Hi", amountCents: 100,
       paidBy: row._id, splits: [{ memberId: row._id, amountCents: 100 }],
-      date: "2026-09-20", isSettlement: false,
+      date: "2026-09-20", category: "other", splitMode: "equal", isSettlement: false,
     });
     expect(_id).toBeTruthy();
   });
@@ -171,7 +175,7 @@ describe("members.join", () => {
 describe("owner controls", () => {
   it("owner rotates even after leaving, and can rejoin", async () => {
     const { alice, t, g, creator } = await setupOutsider();
-    await alice.mutation(api.members.remove, { publicId: g.publicId, memberId: creator._id });
+    await alice.action(api.members.remove, { publicId: g.publicId, memberId: creator._id });
     const { inviteCode } = await alice.mutation(api.groups.rotateCode, { publicId: g.publicId });
     expect(inviteCode).toHaveLength(10);
     const rejoined = await alice.mutation(api.members.join, { publicId: g.publicId });
@@ -179,24 +183,6 @@ describe("owner controls", () => {
     expect(await t.query(api.members.list, { publicId: g.publicId })).toHaveLength(1);
   });
 
-  it("ownerless groups fall back to member rotation", async () => {
-    const { alice, mallory, t, g } = await setupOutsider();
-    await t.run(async (ctx) => {
-      const row = await ctx.db
-        .query("groups")
-        .withIndex("by_publicId", (q) => q.eq("publicId", g.publicId))
-        .first();
-      const { ownerUserId: _drop, ...rest } = row!;
-      void _drop;
-      await ctx.db.replace(row!._id, rest as never);
-    });
-    // Alice is still a linked member → allowed.
-    const { inviteCode } = await alice.mutation(api.groups.rotateCode, { publicId: g.publicId });
-    expect(inviteCode).toHaveLength(10);
-    // Outsider still blocked, now at the membership gate.
-    await expect(mallory.mutation(api.groups.rotateCode, { publicId: g.publicId }))
-      .rejects.toThrow(/not a member/i);
-  });
 });
 
 describe("getByPublicId owner visibility", () => {
@@ -225,14 +211,14 @@ describe("soft-deleted members keep history readable", () => {
         { memberId: creator._id, amountCents: 1000 },
         { memberId: zed._id, amountCents: 1000 },
       ],
-      date: "2026-09-20", isSettlement: false,
+      date: "2026-09-20", category: "other", splitMode: "equal", isSettlement: false,
     });
     await alice.mutation(api.expenses.add, {
       publicId: g.publicId, description: "Pay", amountCents: 1000,
       paidBy: zed._id, splits: [{ memberId: creator._id, amountCents: 1000 }],
-      date: "2026-09-21", isSettlement: true,
+      date: "2026-09-21", category: "other", splitMode: "equal", isSettlement: true,
     });
-    await alice.mutation(api.members.remove, { publicId: g.publicId, memberId: zed._id });
+    await alice.action(api.members.remove, { publicId: g.publicId, memberId: zed._id });
     return { t, alice, g, creator, zed };
   }
 
@@ -250,7 +236,7 @@ describe("soft-deleted members keep history readable", () => {
     await expect(alice.mutation(api.expenses.add, {
       publicId: g.publicId, description: "New", amountCents: 100,
       paidBy: zed._id, splits: [{ memberId: zed._id, amountCents: 100 }],
-      date: "2026-09-22", isSettlement: false,
+      date: "2026-09-22", category: "other", splitMode: "equal", isSettlement: false,
     })).rejects.toThrow(/has left/i);
     await expect(alice.mutation(api.expenses.add, {
       publicId: g.publicId, description: "New", amountCents: 200,
@@ -258,7 +244,7 @@ describe("soft-deleted members keep history readable", () => {
         { memberId: creator._id, amountCents: 100 },
         { memberId: zed._id, amountCents: 100 },
       ],
-      date: "2026-09-22", isSettlement: false,
+      date: "2026-09-22", category: "other", splitMode: "equal", isSettlement: false,
     })).rejects.toThrow(/has left/i);
   });
 
@@ -275,6 +261,8 @@ describe("soft-deleted members keep history readable", () => {
         { memberId: zed._id, amountCents: 1000 },
       ],
       date: "2026-09-20",
+      category: "other",
+      splitMode: "equal",
     });
     // Swapping Zed out is allowed too.
     await alice.mutation(api.expenses.update, {
@@ -282,12 +270,14 @@ describe("soft-deleted members keep history readable", () => {
       amountCents: 1000, paidBy: creator._id,
       splits: [{ memberId: creator._id, amountCents: 1000 }],
       date: "2026-09-20",
+      category: "other",
+      splitMode: "equal",
     });
     // Re-adding Zed to a fresh expense is rejected.
     await expect(alice.mutation(api.expenses.add, {
       publicId: g.publicId, description: "New", amountCents: 100,
       paidBy: creator._id, splits: [{ memberId: zed._id, amountCents: 100 }],
-      date: "2026-09-22", isSettlement: false,
+      date: "2026-09-22", category: "other", splitMode: "equal", isSettlement: false,
     })).rejects.toThrow(/has left/i);
   });
 
@@ -301,7 +291,7 @@ describe("soft-deleted members keep history readable", () => {
     expect(members.find((m) => m._id === zed._id)).toMatchObject({ status: "active", name: "Zeddy" });
 
     // Leave again, then rejoin via join (no temp name → keeps row name).
-    await alice.mutation(api.members.remove, { publicId: g.publicId, memberId: zed._id });
+    await alice.action(api.members.remove, { publicId: g.publicId, memberId: zed._id });
     const { authed: zedAuth, userId: zedId } = await seedUser(t, { name: "Zeddy", email: "zed@x.co" });
     await verifyUser(t, zedId);
     const rejoined = await zedAuth.mutation(api.members.join, { publicId: g.publicId });

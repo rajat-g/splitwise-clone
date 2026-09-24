@@ -57,14 +57,6 @@ describe("computeBalances", () => {
     ];
     expect(computeBalances(members, expenses)).toEqual({ a: 50, b: -50 });
   });
-  it("handles legacy float-amount expenses", () => {
-    const members = [m("a"), m("b")];
-    const expenses = [
-      { paidBy: "a", amount: 100, isSettlement: false,
-        splits: { a: 50, b: 50 } },
-    ];
-    expect(computeBalances(members, expenses)).toEqual({ a: 50, b: -50 });
-  });
   it("applies settlements payer-positive, receiver-negative", () => {
     const members = [m("a"), m("b")];
     const expenses = [
@@ -73,14 +65,11 @@ describe("computeBalances", () => {
     ];
     expect(computeBalances(members, expenses)).toEqual({ a: 20, b: -20 });
   });
-  it("tolerates settlements and expenses with missing splits", () => {
+  it("handles valid settlement split rows", () => {
     const members = [m("a"), m("b")];
     expect(computeBalances(members, [
-      { paidBy: "a", amountCents: 1000, isSettlement: true, splits: [] },
-    ])).toEqual({ a: 10, b: 0 });
-    expect(computeBalances(members, [
-      { paidBy: "a", amountCents: 1000, isSettlement: false },
-    ])).toEqual({ a: 10, b: 0 });
+      { paidBy: "a", amountCents: 1000, isSettlement: true, splits: [{ memberId: "b", amountCents: 1000 }] },
+    ])).toEqual({ a: 10, b: -10 });
     expect(computeBalances([{ id: "x", name: "X" }], [
       { paidBy: "x", amountCents: 1000, isSettlement: false, splits: [{ memberId: "x", amountCents: 1000 }] },
     ])).toEqual({ x: 0 });
@@ -207,14 +196,6 @@ describe("splitTypeLabel", () => {
     expect(splitTypeLabel({ splitMode: "exact", splits: [] })).toBe("Exact");
     expect(splitTypeLabel({ splitMode: "percent", splits: [] })).toBe("%");
     expect(splitTypeLabel({ splitMode: "shares", splits: [] })).toBe("Shares");
-    expect(splitTypeLabel({ splitMode: "EQUAL", splits: [] })).toBe("Equal");
-  });
-  it("infers Equal for even or single splits", () => {
-    expect(splitTypeLabel({ splits: [{ amountCents: 500 }, { amountCents: 500 }] })).toBe("Equal");
-    expect(splitTypeLabel({ splits: [{ amountCents: 500 }] })).toBe("Equal");
-    expect(splitTypeLabel({})).toBe("Equal");
-  });
-  it("infers Custom for uneven splits", () => {
-    expect(splitTypeLabel({ splits: [{ amountCents: 600 }, { amountCents: 400 }] })).toBe("Custom");
+    expect(splitTypeLabel({ splitMode: "equal", splits: [] })).toBe("Equal");
   });
 });

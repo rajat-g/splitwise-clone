@@ -9,6 +9,8 @@ const entry = {
   paidBy: "m1",
   splits: [{ memberId: "m1", amountCents: 1000 }],
   date: "2026-09-20",
+  category: "food",
+  splitMode: "equal",
   isSettlement: false,
 };
 
@@ -38,13 +40,6 @@ describe("syncOutbox", () => {
     expect(res).toEqual({ synced: 1, total: 1 });
     expect(c.mutation).toHaveBeenCalledTimes(1);
     expect(getOutbox()).toHaveLength(0);
-  });
-
-  it("passes category/splitMode defaults for legacy queued entries", async () => {
-    enqueueAdd(G, { ...entry, category: undefined, splitMode: undefined }, "u1");
-    const c = client();
-    await syncOutbox(c, G, { userId: "u1" });
-    expect(c.mutation.mock.calls[0][1]).toMatchObject({ category: "other", splitMode: "equal" });
   });
 
   it("merges an update queued behind its own add into one synced op", async () => {
@@ -90,14 +85,6 @@ describe("syncOutbox", () => {
     const res = await syncOutbox(c, G, { userId: "u1" });
     expect(res).toEqual({ synced: 2, total: 2 });
     expect(getOutbox()).toHaveLength(0);
-  });
-
-  it("leaves unstamped legacy ops for explicit recovery", async () => {
-    enqueueAdd(G, entry);
-    const c = client();
-    expect(await syncOutbox(c, G, { userId: "u1" })).toEqual({ synced: 0, total: 0 });
-    expect(c.mutation).not.toHaveBeenCalled();
-    expect(getOutbox()).toHaveLength(1);
   });
 
   it("never replays another account's ops", async () => {

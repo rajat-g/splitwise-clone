@@ -28,9 +28,9 @@ export async function syncOutbox(client, publicId, { includeFailed = false, user
           paidBy: op.entry.paidBy,
           splits: op.entry.splits,
           date: op.entry.date,
-          category: op.entry.category ?? "other",
-          splitMode: op.entry.splitMode ?? "equal",
-          isSettlement: !!op.entry.isSettlement,
+          category: op.entry.category,
+          splitMode: op.entry.splitMode,
+          isSettlement: op.entry.isSettlement,
           clientId: op.clientId,
         });
         if (res?._id) tempToReal.set(op.tempId, String(res._id));
@@ -47,8 +47,8 @@ export async function syncOutbox(client, publicId, { includeFailed = false, user
           paidBy: op.patch.paidBy,
           splits: op.patch.splits,
           date: op.patch.date,
-          category: op.patch.category ?? "other",
-          splitMode: op.patch.splitMode ?? "equal",
+          category: op.patch.category,
+          splitMode: op.patch.splitMode,
         });
       } else {
         const realId = tempToReal.get(String(op.expenseId)) ?? op.expenseId;
@@ -63,7 +63,15 @@ export async function syncOutbox(client, publicId, { includeFailed = false, user
       dropOp(op.opId);
       synced++;
     } catch (e) {
-      markOp(op.opId, { status: "failed", error: friendly(e) });
+      // A delete may have committed just before a tab crashed, leaving its
+      // persisted queue row in "syncing". Replaying that intent is complete
+      // if the server confirms the expense is already absent.
+      if (op.kind === "remove" && /expense not found/i.test(friendly(e))) {
+        dropOp(op.opId);
+        synced++;
+      } else {
+        markOp(op.opId, { status: "failed", error: friendly(e) });
+      }
     }
   }
   return { synced, total: ops.length };

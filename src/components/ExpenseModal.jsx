@@ -19,18 +19,9 @@ const optionLabel = (m, all) => {
 };
 const MODES = [["equal", "Equal"], ["exact", "Exact"], ["percent", "%"], ["shares", "Shares"]];
 
-// Editing must never silently re-split: restore the stored mode. Legacy rows
-// without one infer from the saved amounts — even splits mean equal, uneven
-// ones open as exact so the loaded values round-trip losslessly on save.
+// Editing restores the saved mode so the existing split stays intact.
 function initialMode(expense) {
-  if (MODES.some(([v]) => v === expense?.splitMode)) return expense.splitMode;
-  const amounts = Object.values(expense?.splits ?? {}).map(Number);
-  if (amounts.length > 1) {
-    const [first] = amounts;
-    if (amounts.every((a) => a === first)) return "equal";
-    return "exact";
-  }
-  return "equal";
+  return expense?.splitMode ?? "equal";
 }
 
 export default function ExpenseModal({ members, currency, initial, onClose, onSave, saving }) {
@@ -38,7 +29,7 @@ export default function ExpenseModal({ members, currency, initial, onClose, onSa
   const [amount, setAmount] = useState(initial?.amount?.toString() || "");
   const [paidBy, setPaidBy] = useState(initial?.paidBy ? String(initial.paidBy) : (members[0] ? mid(members[0]) : ""));
   const [date, setDate] = useState(initial?.date || localDateString());
-  const [category, setCategory] = useState(() => normalizeCategory(initial?.category, DEFAULT_CATEGORY));
+  const [category, setCategory] = useState(() => initial?.category ?? DEFAULT_CATEGORY);
   const [mode, setMode] = useState(() => initialMode(initial));
   const [included, setIncluded] = useState(() => {
     if (initial?.splits) return Object.keys(initial.splits).map(String);

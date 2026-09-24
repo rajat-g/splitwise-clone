@@ -15,18 +15,16 @@ const EXPENSE_CATEGORIES = [
   "entertainment", "utilities", "rent", "health", "other",
 ];
 
-function normalizeCategory(raw: unknown): string {
-  const c = String(raw ?? "other").trim().toLowerCase();
-  if ((EXPENSE_CATEGORIES as readonly string[]).includes(c)) return c;
+function validateCategory(category: string): string {
+  if ((EXPENSE_CATEGORIES as readonly string[]).includes(category)) return category;
   throw new Error("Invalid category.");
 }
 
 // Must match the split modes in ExpenseModal.
 const SPLIT_MODES = ["equal", "exact", "percent", "shares"];
 
-function normalizeSplitMode(raw: unknown): string {
-  const m = String(raw ?? "equal").trim().toLowerCase();
-  if ((SPLIT_MODES as readonly string[]).includes(m)) return m;
+function validateSplitMode(mode: string): string {
+  if ((SPLIT_MODES as readonly string[]).includes(mode)) return mode;
   throw new Error("Invalid split type.");
 }
 
@@ -81,8 +79,8 @@ export const list = query({
     paidBy: v.id("members"),
     splits: v.array(v.object({ memberId: v.id("members"), amountCents: v.number() })),
     date: v.string(),
-    category: v.optional(v.string()),
-    splitMode: v.optional(v.string()),
+    category: v.string(),
+    splitMode: v.string(),
     isSettlement: v.boolean(),
     createdByName: v.string(),
     createdAt: v.number(),
@@ -119,8 +117,8 @@ export const add = mutation({
     paidBy: v.id("members"),
     splits: v.array(v.object({ memberId: v.id("members"), amountCents: v.number() })),
     date: v.string(),
-    category: v.optional(v.string()),
-    splitMode: v.optional(v.string()),
+    category: v.string(),
+    splitMode: v.string(),
     isSettlement: v.boolean(),
     clientId: v.optional(v.string()),
   },
@@ -146,7 +144,7 @@ export const add = mutation({
     // Left members stay in history but can't join NEW expenses.
     const leftName = (id: Id<"members">) => {
       const m = members.get(id);
-      return m && m.status === "left" ? m.name : null;
+      return m?.status === "left" ? m.name : null;
     };
     const leftPaid = leftName(args.paidBy);
     if (leftPaid) throw new Error(`${leftPaid} has left the group and can't be part of new expenses.`);
@@ -162,16 +160,17 @@ export const add = mutation({
     });
     const actor = await resolveActorName(ctx);
     const now = Date.now();
-    const category = args.isSettlement ? undefined : normalizeCategory(args.category);
-    const splitMode = args.isSettlement ? undefined : normalizeSplitMode(args.splitMode);
+    const category = validateCategory(args.category);
+    const splitMode = validateSplitMode(args.splitMode);
     const _id = await ctx.db.insert("expenses", {
       groupId: g._id, description, amountCents: args.amountCents, paidBy: args.paidBy,
       splits: args.splits, date: args.date, isSettlement: args.isSettlement,
       createdByName: actor, createdAt: now, updatedAt: now,
-      ...(category ? { category } : {}),
-      ...(splitMode ? { splitMode } : {}),
+      category,
+      splitMode,
       ...(args.clientId ? { clientId: args.clientId } : {}),
     });
+    await ctx.db.patch(g._id, { ledgerRevision: g.ledgerRevision + 1 });
     await ctx.db.insert("activity", {
       groupId: g._id,
       type: args.isSettlement ? "settle" : "expense_added",
@@ -193,8 +192,8 @@ export const update = mutation({
     paidBy: v.id("members"),
     splits: v.array(v.object({ memberId: v.id("members"), amountCents: v.number() })),
     date: v.string(),
-    category: v.optional(v.string()),
-    splitMode: v.optional(v.string()),
+    category: v.string(),
+    splitMode: v.string(),
   },
   handler: async (ctx, args) => {
     const g = await groupByPublicId(ctx, args.publicId);
@@ -223,12 +222,13 @@ export const update = mutation({
       date: args.date, isSettlement: false,
     });
     const actor = await resolveActorName(ctx);
-    const category = normalizeCategory(args.category);
-    const splitMode = normalizeSplitMode(args.splitMode);
+    const category = validateCategory(args.category);
+    const splitMode = validateSplitMode(args.splitMode);
     await ctx.db.patch(args.expenseId, {
       description, amountCents: args.amountCents, paidBy: args.paidBy,
       splits: args.splits, date: args.date, category, splitMode, updatedAt: Date.now(),
     });
+    await ctx.db.patch(g._id, { ledgerRevision: g.ledgerRevision + 1 });
     await ctx.db.insert("activity", {
       groupId: g._id, type: "expense_updated", text: `${actor} updated "${description}"`,
       actorName: actor, expenseId: args.expenseId, createdAt: Date.now(),
@@ -246,6 +246,7 @@ export const remove = mutation({
     if (!exp || exp.groupId !== g._id) throw new Error("Expense not found.");
     const actor = await resolveActorName(ctx);
     await ctx.db.delete(args.expenseId);
+    await ctx.db.patch(g._id, { ledgerRevision: g.ledgerRevision + 1 });
     await ctx.db.insert("activity", {
       groupId: g._id, type: "expense_deleted", text: `${actor} deleted "${exp.description}"`,
       actorName: actor, createdAt: Date.now(),

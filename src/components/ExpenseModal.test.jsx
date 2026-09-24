@@ -142,23 +142,6 @@ describe("ExpenseModal", () => {
     }));
   });
 
-  it("opens legacy uneven splits as exact so values round-trip", () => {
-    const onSave = vi.fn();
-    render(
-      <ExpenseModal members={members} currency="$" onClose={() => {}} onSave={onSave}
-        initial={{
-          description: "Dinner", amount: 100, paidBy: "m1", date: "2026-09-20",
-          splitMode: "bogus", splits: { m1: 70, m2: 30 },
-        }} />
-    );
-    expect(screen.getByRole("button", { name: "Exact" })).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
-      splitMode: "exact",
-      splits: { m1: 70, m2: 30 },
-    }));
-  });
-
   it("shows a left payer as a disabled option and preserves them on save", () => {
     const onSave = vi.fn();
     render(

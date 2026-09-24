@@ -7,6 +7,7 @@
 //   node scripts/setup-auth.mjs              # dev deployment
 //   node scripts/setup-auth.mjs --prod       # production deployment
 //   node scripts/setup-auth.mjs --dry-run    # show what would run, change nothing
+//   node scripts/setup-auth.mjs --rotate     # explicitly replace existing keys (signs everyone out)
 //
 // Requires: `npx convex dev` to have been run once (Convex project + login).
 
@@ -49,6 +50,7 @@ function runConvex(convexArgs, { capture = false } = {}) {
 const args = process.argv.slice(2);
 const PROD = args.includes("--prod");
 const DRY_RUN = args.includes("--dry-run");
+const ROTATE = args.includes("--rotate");
 const SCOPE = PROD ? ["--prod"] : [];
 
 function mask(s) {
@@ -70,6 +72,26 @@ if (DRY_RUN) {
   console.log(`  npx convex env set ${SCOPE.join(" ")} JWKS ${mask(jwks)}`.replace(/  +/g, " ").trimEnd());
   console.log("\n[dry-run] nothing changed.");
   process.exit(0);
+}
+
+// A fresh pair replaces the deployment's current signer. Refuse accidental
+// rotation; env list shows names without exposing their secret values.
+const currentEnv = runConvex(["env", "list", ...SCOPE], { capture: true });
+if (currentEnv.status !== 0) {
+  process.stderr.write(currentEnv.stderr || "");
+  throw new Error("Could not inspect deployment auth keys. No environment values were changed.");
+}
+const currentOutput = String(currentEnv.stdout || "");
+const hasPrivateKey = /\bJWT_PRIVATE_KEY\b/.test(currentOutput);
+const hasJwks = /\bJWKS\b/.test(currentOutput);
+if ((hasPrivateKey || hasJwks) && !ROTATE) {
+  throw new Error(
+    "Auth keys already exist on this deployment. Refusing to replace them because this signs out current users. " +
+    "Use --rotate only when you intend to rotate credentials."
+  );
+}
+if (ROTATE) {
+  console.warn("Explicit key rotation requested: existing auth sessions will no longer validate.\n");
 }
 
 for (const [name, value] of [["JWT_PRIVATE_KEY", privateKey], ["JWKS", jwks]]) {
