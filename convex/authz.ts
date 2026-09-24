@@ -47,7 +47,9 @@ export async function requireGroupMember(ctx: MutationCtx, groupId: Id<"groups">
     .query("members")
     .withIndex("by_group", (q) => q.eq("groupId", groupId))
     .collect();
-  const member = members.find((m) => m.userId !== undefined && m.userId === userId) ?? null;
+  const member = members.find(
+    (m) => m.userId !== undefined && m.userId === userId && m.status !== "left"
+  ) ?? null;
   if (!member) {
     throw new Error("You are not a member of this group. Join it first to make changes.");
   }

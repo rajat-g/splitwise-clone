@@ -1,3 +1,4 @@
+import { paginationOptsValidator, paginationResultValidator } from "convex/server";
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
@@ -46,6 +47,11 @@ function validateExpenseInput(args: {
   if (!Number.isInteger(args.amountCents) || args.amountCents <= 0) throw new Error("Amount must be greater than 0.");
   if (args.amountCents > MAX_CENTS) throw new Error("Amount is too large.");
   if (!DATE_RE.test(args.date || "")) throw new Error("Invalid date.");
+  const [year, month, day] = args.date.split("-").map(Number);
+  const calendarDate = new Date(0);
+  calendarDate.setUTCHours(0, 0, 0, 0);
+  calendarDate.setUTCFullYear(year, month - 1, day);
+  if (calendarDate.toISOString().slice(0, 10) !== args.date) throw new Error("Invalid date.");
   if (!args.paidBy) throw new Error("Choose who paid.");
   if (!args.splits.length) throw new Error("Select at least one person.");
   for (const s of args.splits) {
@@ -65,13 +71,31 @@ function validateExpenseInput(args: {
 }
 
 export const list = query({
-  args: { publicId: v.string() },
+  args: { publicId: v.string(), paginationOpts: paginationOptsValidator },
+  returns: paginationResultValidator(v.object({
+    _id: v.id("expenses"),
+    _creationTime: v.number(),
+    groupId: v.id("groups"),
+    description: v.string(),
+    amountCents: v.number(),
+    paidBy: v.id("members"),
+    splits: v.array(v.object({ memberId: v.id("members"), amountCents: v.number() })),
+    date: v.string(),
+    category: v.optional(v.string()),
+    splitMode: v.optional(v.string()),
+    isSettlement: v.boolean(),
+    createdByName: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    clientId: v.optional(v.string()),
+  })),
   handler: async (ctx, args) => {
     const g = await ctx.db.query("groups").withIndex("by_publicId", (q) => q.eq("publicId", args.publicId)).first();
-    if (!g) return [];
-    const rows = await ctx.db.query("expenses").withIndex("by_group", (q) => q.eq("groupId", g._id)).collect();
-    rows.sort((a, b) => b.createdAt - a.createdAt);
-    return rows;
+    if (!g) return { page: [], isDone: true, continueCursor: "" };
+    return await ctx.db.query("expenses")
+      .withIndex("by_group", (q) => q.eq("groupId", g._id))
+      .order("desc")
+      .paginate(args.paginationOpts);
   },
 });
 
@@ -80,9 +104,10 @@ export const activity = query({
   handler: async (ctx, args) => {
     const g = await ctx.db.query("groups").withIndex("by_publicId", (q) => q.eq("publicId", args.publicId)).first();
     if (!g) return [];
-    const rows = await ctx.db.query("activity").withIndex("by_group", (q) => q.eq("groupId", g._id)).collect();
-    rows.sort((a, b) => b.createdAt - a.createdAt);
-    return rows.slice(0, 100);
+    return await ctx.db.query("activity")
+      .withIndex("by_group", (q) => q.eq("groupId", g._id))
+      .order("desc")
+      .take(100);
   },
 });
 

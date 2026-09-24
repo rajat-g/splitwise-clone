@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
-import { seedGroup, seedUser } from "./testUtils";
+import { allExpenses, seedGroup, seedUser } from "./testUtils";
 
 const modules = import.meta.glob("./**/*.ts");
 function fresh() {
@@ -62,7 +62,7 @@ describe("expenses.add", () => {
         ],
       }),
     });
-    const rows = await t.query(api.expenses.list, { publicId: g.publicId });
+    const rows = await allExpenses(t, g.publicId);
     expect(rows.find((e) => e._id === _id)).toMatchObject({ category: "food", splitMode: "equal" });
   });
 
@@ -79,7 +79,7 @@ describe("expenses.add", () => {
     const first = await authed.mutation(api.expenses.add, payload);
     const second = await authed.mutation(api.expenses.add, payload);
     expect(second._id).toEqual(first._id);
-    expect(await t.query(api.expenses.list, { publicId: g.publicId })).toHaveLength(1);
+    expect(await allExpenses(t, g.publicId)).toHaveLength(1);
   });
 
   it("validates amounts, dates, splits and membership", async () => {
@@ -192,9 +192,9 @@ describe("expenses.list / activity", () => {
       publicId: g.publicId,
       ...dinner({ paidBy: creator._id, splits: [{ memberId: creator._id, amountCents: 9000 }] }),
     });
-    const rows = await t.query(api.expenses.list, { publicId: g.publicId });
+    const rows = await allExpenses(t, g.publicId);
     expect(rows).toHaveLength(1);
-    expect(await t.query(api.expenses.list, { publicId: "nope" })).toEqual([]);
+    expect(await allExpenses(t, "nope")).toEqual([]);
     const feed = await t.query(api.expenses.activity, { publicId: g.publicId });
     expect(feed.length).toBeGreaterThan(0);
     expect(feed[0].text).toMatch(/Dinner/);
@@ -229,7 +229,7 @@ describe("expenses.update", () => {
       category: "travel",
       splitMode: "exact",
     });
-    const rows = await t.query(api.expenses.list, { publicId: g.publicId });
+    const rows = await allExpenses(t, g.publicId);
     expect(rows.find((e) => e._id === _id)).toMatchObject({
       description: "Fancy dinner",
       amountCents: 10000,
@@ -283,7 +283,7 @@ describe("expenses.remove", () => {
       ...dinner({ paidBy: creator._id, splits: [{ memberId: creator._id, amountCents: 9000 }] }),
     });
     await authed.mutation(api.expenses.remove, { publicId: g.publicId, expenseId: _id });
-    expect(await t.query(api.expenses.list, { publicId: g.publicId })).toHaveLength(0);
+    expect(await allExpenses(t, g.publicId)).toHaveLength(0);
     const feed = await t.query(api.expenses.activity, { publicId: g.publicId });
     expect(feed.some((a) => a.type === "expense_deleted")).toBe(true);
   });

@@ -47,6 +47,14 @@ export function useQuery(queryFn, args) {
   }
 }
 
+export function usePaginatedQuery(queryFn, args) {
+  return {
+    results: useQuery(queryFn, args) ?? [],
+    status: "Exhausted",
+    loadMore: () => false,
+  };
+}
+
 export function useMutation(queryFn) {
   const name = queryFn?.__mockName;
   return async () => {

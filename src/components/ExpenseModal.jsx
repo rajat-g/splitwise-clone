@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { buildSplits } from "../lib/split";
+import { buildSplits, localDateString } from "../lib/split";
 import { DEFAULT_CATEGORY, EXPENSE_CATEGORIES, normalizeCategory } from "../lib/categories";
 import { Alert, Avatar, Button, Field, Select, TextInput } from "./ui";
 import { Sheet } from "./Sheet";
@@ -37,7 +37,7 @@ export default function ExpenseModal({ members, currency, initial, onClose, onSa
   const [description, setDescription] = useState(initial?.description || "");
   const [amount, setAmount] = useState(initial?.amount?.toString() || "");
   const [paidBy, setPaidBy] = useState(initial?.paidBy ? String(initial.paidBy) : (members[0] ? mid(members[0]) : ""));
-  const [date, setDate] = useState(initial?.date || new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(initial?.date || localDateString());
   const [category, setCategory] = useState(() => normalizeCategory(initial?.category, DEFAULT_CATEGORY));
   const [mode, setMode] = useState(() => initialMode(initial));
   const [included, setIncluded] = useState(() => {

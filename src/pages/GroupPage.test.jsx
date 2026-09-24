@@ -7,6 +7,11 @@ const mockUseConvex = vi.hoisted(() => vi.fn());
 
 vi.mock("convex/react", () => ({
   useQuery: (...args) => mockUseQuery(...args),
+  usePaginatedQuery: (query, args) => ({
+    results: mockUseQuery(query, args) ?? [],
+    status: "Exhausted",
+    loadMore: vi.fn(),
+  }),
   useMutation: (...args) => mockUseMutation(...args),
   useConvex: (...args) => mockUseConvex(...args),
   useConvexAuth: (...args) => mockUseConvexAuth(...args),

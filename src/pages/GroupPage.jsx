@@ -1,8 +1,8 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
-import { useConvex, useConvexAuth, useMutation, useQuery } from "convex/react";
+import { useConvex, useConvexAuth, useMutation, usePaginatedQuery, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
-import { computeBalances, simplifyDebts, fmt, toCents, splitsMapToArray, expenseToForm, fromCents, formatInviteCode } from "../lib/split";
+import { computeBalances, simplifyDebts, fmt, toCents, splitsMapToArray, expenseToForm, fromCents, formatInviteCode, localDateString } from "../lib/split";
 import { EXPENSE_CATEGORIES, categoryLabel, categoryTone, normalizeCategory } from "../lib/categories";
 import { getDeviceId, saveRecentGroup } from "../lib/identity";
 import { useOnline } from "../lib/useOnline";
@@ -79,16 +79,23 @@ function validateInvite(emailRaw, tempRaw, membersList) {
     if (temp.length > MAX_MEMBER_NAME) return `Keep temp names under ${MAX_MEMBER_NAME} characters.`;
     if (/[\n\r\t]/.test(temp)) return "Temp names can't contain line breaks or tabs.";
   }
-  if (membersList.length >= MAX_MEMBERS_PER_GROUP) return `Groups are capped at ${MAX_MEMBERS_PER_GROUP} members.`;
-  if (membersList.some((m) => memberEmail(m) === email)) return `${email} is already in this group.`;
+  const duplicate = membersList.find((m) => memberEmail(m) === email);
+  if (duplicate && duplicate.status !== "left") return `${email} is already in this group.`;
+  if (!duplicate && membersList.length >= MAX_MEMBERS_PER_GROUP) return `Groups are capped at ${MAX_MEMBERS_PER_GROUP} members.`;
   return "";
 }
 
 export default function GroupPage() {
   const { id: publicId } = useParams();
+  const online = useOnline();
   const group = useQuery(api.groups.getByPublicId, { publicId });
   const members = useQuery(api.members.list, { publicId });
-  const expenses = useQuery(api.expenses.list, { publicId });
+  const { results: expensePages, status: expensePageStatus, loadMore } = usePaginatedQuery(
+    api.expenses.list,
+    online ? { publicId } : "skip",
+    { initialNumItems: 100 }
+  );
+  const expenses = expensePageStatus === "Exhausted" ? expensePages : undefined;
   const activity = useQuery(api.expenses.activity, { publicId });
 
   const addMember = useMutation(api.members.add);
@@ -121,8 +128,13 @@ export default function GroupPage() {
   const { isAuthenticated } = useConvexAuth();
   const viewer = useQuery(api.users.viewer, isAuthenticated ? {} : "skip");
   const convexClient = useConvex();
-  const online = useOnline();
   const allOps = useOutbox();
+
+  // Fetch every bounded page so balances, summaries, and exports still use
+  // the complete ledger rather than silently omitting older transactions.
+  useEffect(() => {
+    if (online && expensePageStatus === "CanLoadMore") loadMore(100);
+  }, [online, expensePageStatus, loadMore]);
 
   // Identity boundary: the device outbox is shared across accounts, so the
   // group queue is split — allGroupOps (explains the OutboxBar, incl.
@@ -377,7 +389,7 @@ export default function GroupPage() {
       description: `Payment: ${nameOf(from)} → ${nameOf(to)}`,
       amountCents, paidBy: from,
       splits: [{ memberId: to, amountCents }],
-      date: new Date().toISOString().slice(0, 10),
+      date: localDateString(),
       isSettlement: true,
     };
     if (!online) {
@@ -488,18 +500,26 @@ export default function GroupPage() {
   const exportCsv = () => {
     const rows = [["date", "description", "category", "amount", "paid_by", "type", "splits"]];
     visibleExpenses.forEach((e) => rows.push([
-      e.date, `"${(e.description || "").replace(/"/g, '""')}"`,
+      e.date, e.description || "",
       e.isSettlement ? "" : normalizeCategory(e.category),
       fromCents(e.amountCents),
       nameOf(e.paidBy), e.isSettlement ? "settlement" : "expense",
-      `"${(e.splits || []).map((s) => `${nameOf(s.memberId)}:${fromCents(s.amountCents)}`).join("; ")}"`,
+      (e.splits || []).map((s) => `${nameOf(s.memberId)}:${fromCents(s.amountCents)}`).join("; "),
     ]));
-    const blob = new Blob([rows.map((r) => r.join(",")).join("\n")], { type: "text/csv" });
+    const csv = rows.map((row, rowIndex) => row.map((value, index) => {
+      let cell = String(value ?? "");
+      // Spreadsheet applications may execute formulas in CSV text cells.
+      // Prefix untrusted descriptions/member names before RFC-style quoting.
+      if (rowIndex > 0 && [1, 4, 6].includes(index) && /^\s*[=+\-@]/.test(cell)) cell = `'${cell}`;
+      return `"${cell.replace(/"/g, '""')}"`;
+    }).join(",")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
+    a.href = url;
     a.download = `${renderGroup?.name || "group"}-expenses.csv`;
     a.click();
-    URL.revokeObjectURL(a.href);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const copyInvite = async () => {

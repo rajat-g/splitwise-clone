@@ -6,7 +6,7 @@ import { convexTest } from "convex-test";
 import { describe, expect, it } from "vitest";
 import { api } from "./_generated/api";
 import schema from "./schema";
-import { seedGroup, seedUser, verifyUser } from "./testUtils";
+import { allExpenses, seedGroup, seedUser, verifyUser } from "./testUtils";
 
 const modules = import.meta.glob("./**/*.ts");
 function fresh() {
@@ -45,7 +45,7 @@ describe("outsiders cannot write", () => {
     await expect(mallory.mutation(api.expenses.remove, { publicId: g.publicId, expenseId: _id }))
       .rejects.toThrow(/not a member/i);
     // Untouched by the attempts.
-    expect(await t.query(api.expenses.list, { publicId: g.publicId })).toHaveLength(1);
+    expect(await allExpenses(t, g.publicId)).toHaveLength(1);
   });
 
   it("blocks member invite/rename/remove", async () => {
@@ -240,7 +240,7 @@ describe("soft-deleted members keep history readable", () => {
     const { t, g, zed } = await setupHistory();
     const members = await t.query(api.members.list, { publicId: g.publicId });
     expect(members.find((m) => m._id === zed._id)).toMatchObject({ name: "Zed", status: "left" });
-    const expenses = await t.query(api.expenses.list, { publicId: g.publicId });
+    const expenses = await allExpenses(t, g.publicId);
     expect(expenses).toHaveLength(2);
     expect(expenses.every((e) => e.splits.every((s) => members.some((m) => String(m._id) === String(s.memberId))))).toBe(true);
   });
@@ -264,7 +264,7 @@ describe("soft-deleted members keep history readable", () => {
 
   it("allows edits that keep left references, blocks newly added ones", async () => {
     const { alice, t, g, creator, zed } = await setupHistory();
-    const rows = (await t.query(api.expenses.list, { publicId: g.publicId }))
+    const rows = (await allExpenses(t, g.publicId))
       .filter((e) => !e.isSettlement);
     // Rename-only edit keeps Zed's historical split: allowed.
     await alice.mutation(api.expenses.update, {

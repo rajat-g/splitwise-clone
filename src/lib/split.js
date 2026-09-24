@@ -6,6 +6,13 @@ export function fromCents(cents) {
   return (Number(cents) || 0) / 100;
 }
 
+export function localDateString(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function memberKey(m) {
   return String(m._id ?? m.id);
 }
@@ -98,13 +105,17 @@ export function buildSplits({ amount, memberIds, mode, values }) {
       splits[id] = share + (idx === 0 ? remainder : 0);
     });
   } else if (mode === "exact") {
-    let sum = 0;
+    let sumCents = 0;
     for (const id of memberIds) {
       const v = Number(values?.[id]) || 0;
-      splits[id] = Math.round(v * 100) / 100;
-      sum += splits[id];
+      const cents = Math.round(v * 100);
+      splits[id] = cents / 100;
+      sumCents += cents;
     }
-    if (Math.abs(sum - total) > 0.01) return { error: `Exact amounts add to ${sum.toFixed(2)}, must equal ${total.toFixed(2)}.` };
+    const totalCents = Math.round(total * 100);
+    if (sumCents !== totalCents) {
+      return { error: `Exact amounts add to ${(sumCents / 100).toFixed(2)}, must equal ${(totalCents / 100).toFixed(2)}.` };
+    }
   } else if (mode === "percent") {
     let pctSum = 0;
     for (const id of memberIds) pctSum += Number(values?.[id]) || 0;

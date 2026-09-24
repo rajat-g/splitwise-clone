@@ -3,7 +3,7 @@ import { convexTest } from "convex-test";
 import { describe, expect, it } from "vitest";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
-import { seedGroup, seedUser } from "./testUtils";
+import { allExpenses, seedGroup, seedUser } from "./testUtils";
 
 const modules = import.meta.glob("./**/*.ts");
 function fresh() {
@@ -61,7 +61,7 @@ describe("wipe.wipeAll", () => {
     expect(counts.expenses).toBe(1);
     expect(counts.users).toBe(1);
     expect(await t.query(api.members.list, { publicId: g.publicId })).toEqual([]);
-    expect(await t.query(api.expenses.list, { publicId: g.publicId })).toEqual([]);
+    expect(await allExpenses(t, g.publicId)).toEqual([]);
     expect(await t.query(api.users.viewer, {})).toBeNull();
   });
 });

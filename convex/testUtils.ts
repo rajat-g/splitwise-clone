@@ -2,6 +2,7 @@
 // accessor whose identity resolves to it via getAuthUserId (subject carries
 // the user id, matching @convex-dev/auth's subject format without a divider).
 import { api } from "./_generated/api";
+import type { FunctionReturnType } from "convex/server";
 import type { DataModel } from "./_generated/dataModel";
 import type { Id } from "./_generated/dataModel";
 import type { TestConvexRoot } from "convex-test";
@@ -43,4 +44,19 @@ export async function verifyUser(t: T, userId: Id<"users">) {
   await t.run(async (ctx) => {
     await ctx.db.patch(userId, { emailVerificationTime: Date.now() });
   });
+}
+
+export async function allExpenses(t: T, publicId: string) {
+  type ExpensePage = FunctionReturnType<typeof api.expenses.list>;
+  const rows: ExpensePage["page"][number][] = [];
+  let cursor: string | null = null;
+  for (;;) {
+    const result: ExpensePage = await t.query(api.expenses.list, {
+      publicId,
+      paginationOpts: { numItems: 100, cursor },
+    });
+    rows.push(...result.page);
+    if (result.isDone) return rows;
+    cursor = result.continueCursor;
+  }
 }

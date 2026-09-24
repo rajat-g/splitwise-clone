@@ -84,7 +84,7 @@ export const list = query({
     if (userId) {
       const user = await ctx.db.get(userId);
       viewerEmail = (user?.email ?? "").trim().toLowerCase();
-      isMember = rows.some((m) => m.userId !== undefined && m.userId === userId);
+      isMember = rows.some((m) => m.userId !== undefined && m.userId === userId && !isLeft(m));
     }
     return rows.map((m) => {
       const { deviceId: _device, ...rest } = m;
@@ -119,7 +119,6 @@ export const add = mutation({
     // the link can view, but cannot add people. (Joining is members.join.)
     await requireGroupMember(ctx, g._id);
     const existing = await ctx.db.query("members").withIndex("by_group", (q) => q.eq("groupId", g._id)).collect();
-    if (existing.length >= MAX_MEMBERS_PER_GROUP) throw new Error(`Groups are capped at ${MAX_MEMBERS_PER_GROUP} members.`);
 
     const rawEmail = String(args.email ?? "").trim();
     const rawName = String(args.name ?? "").trim();
@@ -168,11 +167,11 @@ export const add = mutation({
         ...(args.deviceId ? { deviceId: args.deviceId } : {}),
         ...(linkedUserId ? { userId: linkedUserId } : {}),
       };
+      if (existing.length >= MAX_MEMBERS_PER_GROUP) throw new Error(`Groups are capped at ${MAX_MEMBERS_PER_GROUP} members.`);
       const _id = await ctx.db.insert("members", doc);
-      const detail = display !== email ? ` (${email})` : "";
       await ctx.db.insert("activity", {
         groupId: g._id, type: "member_added",
-        text: linkedUserId ? `${display} joined the group` : `${display}${detail} was invited`,
+        text: linkedUserId ? `${display} joined the group` : `${display} was invited`,
         actorName: display, createdAt: now,
       });
       return { _id, name: display };
@@ -191,6 +190,7 @@ export const add = mutation({
       }
       return { _id: dup._id, name: dup.name };
     }
+    if (existing.length >= MAX_MEMBERS_PER_GROUP) throw new Error(`Groups are capped at ${MAX_MEMBERS_PER_GROUP} members.`);
     const now = Date.now();
     const _id = await ctx.db.insert("members", { groupId: g._id, name, deviceId: args.deviceId, createdAt: now });
     await ctx.db.insert("activity", {
