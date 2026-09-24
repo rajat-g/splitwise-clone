@@ -42,6 +42,10 @@ function emailsEqual(a: unknown, b: unknown) {
   return String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
 }
 
+function isLeft(m: unknown) {
+  return ((m as { status?: unknown }).status as string | undefined) === "left";
+}
+
 /** Best-effort lookup of a registered user by email (for instant name + link). */
 async function findUserByEmail(ctx: any, email: string) {
   try {
@@ -97,14 +101,28 @@ export const add = mutation({
     // --- Email-invite path ---
     if (rawEmail) {
       const email = cleanEmail(rawEmail);
-      // Already invited? Return the existing row (idempotent).
-      const dupEmail = existing.find((m) => typeof (m as { email?: unknown }).email === "string" && emailsEqual((m as { email?: unknown }).email, email));
-      if (dupEmail) return { _id: dupEmail._id, name: dupEmail.name };
-
       let tempName = "";
       if (rawName) {
         tempName = cleanMemberName(rawName);
         if (tempName.toLowerCase() === email.toLowerCase()) tempName = "";
+      }
+      // Already invited? Return the existing row (idempotent) — reactivating
+      // it when it belongs to someone who left.
+      const dupEmail = existing.find((m) => typeof (m as { email?: unknown }).email === "string" && emailsEqual((m as { email?: unknown }).email, email));
+      if (dupEmail) {
+        if (isLeft(dupEmail)) {
+          const patch: Record<string, unknown> = { status: "active" };
+          if (tempName) patch.name = tempName;
+          await ctx.db.patch(dupEmail._id, patch as never);
+          const now = Date.now();
+          await ctx.db.insert("activity", {
+            groupId: g._id, type: "member_joined",
+            text: `${(patch.name ?? dupEmail.name) as string} rejoined the group`,
+            actorName: (patch.name ?? dupEmail.name) as string, createdAt: now,
+          });
+          return { _id: dupEmail._id, name: (patch.name ?? dupEmail.name) as string };
+        }
+        return { _id: dupEmail._id, name: dupEmail.name };
       }
 
       // If this email already has an account, link it now and show their real name.
@@ -133,7 +151,16 @@ export const add = mutation({
     // --- Legacy name-only path (no email) ---
     const name = cleanMemberName(rawName);
     const dup = existing.find((m) => m.name.toLowerCase() === name.toLowerCase());
-    if (dup) return { _id: dup._id, name: dup.name };
+    if (dup) {
+      if (isLeft(dup)) {
+        await ctx.db.patch(dup._id, { status: "active" });
+        await ctx.db.insert("activity", {
+          groupId: g._id, type: "member_joined",
+          text: `${dup.name} rejoined the group`, actorName: dup.name, createdAt: Date.now(),
+        });
+      }
+      return { _id: dup._id, name: dup.name };
+    }
     const now = Date.now();
     const _id = await ctx.db.insert("members", { groupId: g._id, name, deviceId: args.deviceId, createdAt: now });
     await ctx.db.insert("activity", {
@@ -155,7 +182,18 @@ export const join = mutation({
     const g = await groupByPublicId(ctx, args.publicId);
     const existing = await ctx.db.query("members").withIndex("by_group", (q) => q.eq("groupId", g._id)).collect();
     const linked = existing.find((m) => (m as { userId?: unknown }).userId && String((m as { userId?: unknown }).userId) === String(userId));
-    if (linked) return { _id: linked._id, name: linked.name };
+    if (linked) {
+      // Rejoining after leaving reactivates the historical row (history kept).
+      if (isLeft(linked)) {
+        await ctx.db.patch(linked._id, { status: "active" });
+        const now = Date.now();
+        await ctx.db.insert("activity", {
+          groupId: g._id, type: "member_joined",
+          text: `${linked.name} rejoined the group`, actorName: linked.name, createdAt: now,
+        });
+      }
+      return { _id: linked._id, name: linked.name };
+    }
 
     const user = await ctx.db.get(userId);
     const email = ((user as { email?: unknown } | null)?.email as string | undefined ?? "").trim().toLowerCase();
@@ -168,7 +206,7 @@ export const join = mutation({
           && !(m as { userId?: unknown }).userId
       );
       if (pending) {
-        const patch: Record<string, unknown> = { userId };
+        const patch: Record<string, unknown> = { userId, status: "active" };
         const pEmail = (((pending as { email?: unknown }).email as string | undefined) ?? "").toLowerCase();
         if (!pending.name || pending.name === pEmail || pending.name === pEmail.split("@")[0]) {
           patch.name = realName;
@@ -231,7 +269,7 @@ export const claim = mutation({
         continue;
       }
       if ((m as { userId?: unknown }).userId) continue; // claimed by someone else
-      const patch: Record<string, unknown> = { userId };
+      const patch: Record<string, unknown> = { userId, status: "active" };
       // No custom temp name? Show the real name now (clean UI).
       if (!m.name || m.name === mEmail || m.name === mEmail.split("@")[0] || m.name.toLowerCase() === mEmail) {
         patch.name = realName;
@@ -288,10 +326,11 @@ export const remove = mutation({
   handler: async (ctx, args) => {
     await requireAuth(ctx);
     const g = await groupByPublicId(ctx, args.publicId);
-    await requireGroupMember(ctx, g._id);
+    const { userId: callerId } = await requireGroupMember(ctx, g._id);
     const actor = await resolveActorName(ctx);
     const member = await ctx.db.get(args.memberId);
     if (!member || member.groupId !== g._id) throw new Error("Member not found in this group.");
+    if (isLeft(member)) throw new Error(`${member.name} already left the group.`);
 
     // PROPER BACKEND VALIDATION: compute balances server-side in cents.
     // Refuse to remove anyone with a non-zero balance — no client trust.
@@ -310,11 +349,16 @@ export const remove = mutation({
       }
     }
     if (bal !== 0) throw new Error(`${member.name} has a non-zero balance. Settle up before removing.`);
-    // also refuse if they paid/owe nothing but are referenced? No — zero balance is safe to delete.
-    await ctx.db.delete(args.memberId);
+    // Soft delete: the row stays so historical expenses keep resolving names.
+    // Only active members transact — the UI hides left members from new
+    // splits and the server rejects them there.
+    const self = (member as { userId?: unknown }).userId
+      && String((member as { userId?: unknown }).userId) === String(callerId);
+    await ctx.db.patch(args.memberId, { status: "left" });
     await ctx.db.insert("activity", {
       groupId: g._id, type: "member_removed",
-      text: `${actor} removed ${member.name}`, actorName: actor, createdAt: Date.now(),
+      text: self ? `${actor} left the group` : `${actor} removed ${member.name}`,
+      actorName: actor, createdAt: Date.now(),
     });
     return { ok: true };
   },

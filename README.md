@@ -5,7 +5,7 @@ Realtime group expense splitting. Guests can open a link and view everything —
 ## Features
 
 - Groups with per-group currency, unguessable link (`publicId`) + rotatable 10-char invite code
-- Members by name, scoped to their group (add/rename/remove with validation, per-member settle shortcut, self leave flow, remove blocked on non-zero balance, validated server-side)
+- Members by email invite + temp name, scoped to their group (add/rename/remove with validation, per-member settle shortcut, self leave flow, remove blocked on non-zero balance, validated server-side; removal is a soft delete — history keeps resolving names)
 - Expenses with equal / exact / % / shares splits, edit/delete (settlements immutable)
 - Live balances + simplified debts ("who pays whom"), settle-up payments
 - Activity feed, CSV export, recent-groups on device
@@ -60,6 +60,7 @@ Account behavior:
 - Sign in/up from the header button. Sign-up fields: name, email, password (min 8 chars).
 - Groups get `ownerUserId` and appear under **My groups** on Home, on any device.
 - Guests opening an invite link can view balances, expenses, members, activity — write controls are hidden and the backend rejects writes ("Sign in to make changes." for guests, "You are not a member of this group." for signed-in outsiders). Signed-in outsiders see a Join prompt.
+- Leaving is a soft delete (`status: "left"`): the row stays so historical expenses, balances, and reports keep resolving names. Left members are hidden from new splits/payers (server-enforced), settle to zero before leaving, and rejoin via Join or re-invite.
 - No email verification or password reset wired. Adding reset needs an email sender (e.g. Resend free tier) — ask if you want it.
 
 ## Offline mode

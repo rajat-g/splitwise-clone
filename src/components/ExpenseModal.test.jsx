@@ -158,4 +158,18 @@ describe("ExpenseModal", () => {
       splits: { m1: 70, m2: 30 },
     }));
   });
+
+  it("shows a left payer as a disabled option and preserves them on save", () => {
+    const onSave = vi.fn();
+    render(
+      <ExpenseModal members={members} currency="$" onClose={() => {}} onSave={onSave}
+        initial={{
+          description: "Old taxi", amount: 60, paidBy: "m9", date: "2026-01-05",
+          category: "transport", splitMode: "equal", splits: { m9: 60 }, paidByName: "Dan",
+        }} />
+    );
+    expect(screen.getByText("Dan (left)")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ paidBy: "m9" }));
+  });
 });

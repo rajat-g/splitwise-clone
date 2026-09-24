@@ -69,6 +69,9 @@ export default function ExpenseModal({ members, currency, initial, onClose, onSa
           <Field label="Paid by">
             <Select value={paidBy} onChange={(e) => setPaidBy(e.target.value)}>
               {members.map((m) => <option key={mid(m)} value={mid(m)}>{optionLabel(m)}</option>)}
+              {!members.some((m) => mid(m) === String(paidBy)) && initial?.paidByName && (
+                <option value={paidBy} disabled>{initial.paidByName} (left)</option>
+              )}
             </Select>
           </Field>
           <Field label="Date" className="col-span-2 sm:col-span-1">

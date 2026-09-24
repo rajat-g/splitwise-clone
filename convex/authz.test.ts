@@ -102,7 +102,7 @@ describe("members can transact but not rotate", () => {
     });
     await mallory.mutation(api.members.remove, { publicId: g.publicId, memberId: newbie._id });
     members = await t.query(api.members.list, { publicId: g.publicId });
-    expect(members.some((m) => m.email === "newbie@x.co")).toBe(false);
+    expect(members.find((m) => m.email === "newbie@x.co")).toMatchObject({ status: "left" });
     void alice;
     void creator;
   });
@@ -190,5 +190,107 @@ describe("getByPublicId owner visibility", () => {
     expect(anon).not.toHaveProperty("ownerUserId");
     const authed = await alice.query(api.groups.getByPublicId, { publicId: g.publicId });
     expect(authed).toHaveProperty("ownerUserId");
+  });
+});
+
+describe("soft-deleted members keep history readable", () => {
+  async function setupHistory() {
+    const t = fresh();
+    const { authed: alice } = await seedUser(t, { name: "Alice", email: "alice@x.co" });
+    const g = await seedGroup(alice, { creatorName: "Alice" });
+    await alice.mutation(api.members.add, { publicId: g.publicId, email: "zed@x.co", name: "Zed" });
+    const members = await t.query(api.members.list, { publicId: g.publicId });
+    const creator = members.find((m) => m.name === "Alice")!;
+    const zed = members.find((m) => m.email === "zed@x.co")!;
+    // Zed participates, then settles to zero and leaves.
+    await alice.mutation(api.expenses.add, {
+      publicId: g.publicId, description: "Dinner", amountCents: 2000,
+      paidBy: creator._id, splits: [
+        { memberId: creator._id, amountCents: 1000 },
+        { memberId: zed._id, amountCents: 1000 },
+      ],
+      date: "2026-09-20", isSettlement: false,
+    });
+    await alice.mutation(api.expenses.add, {
+      publicId: g.publicId, description: "Pay", amountCents: 1000,
+      paidBy: zed._id, splits: [{ memberId: creator._id, amountCents: 1000 }],
+      date: "2026-09-21", isSettlement: true,
+    });
+    await alice.mutation(api.members.remove, { publicId: g.publicId, memberId: zed._id });
+    return { t, alice, g, creator, zed };
+  }
+
+  it("retains the row with status left and names still resolve", async () => {
+    const { t, g, zed } = await setupHistory();
+    const members = await t.query(api.members.list, { publicId: g.publicId });
+    expect(members.find((m) => m._id === zed._id)).toMatchObject({ name: "Zed", status: "left" });
+    const expenses = await t.query(api.expenses.list, { publicId: g.publicId });
+    expect(expenses).toHaveLength(2);
+    expect(expenses.every((e) => e.splits.every((s) => members.some((m) => String(m._id) === String(s.memberId))))).toBe(true);
+  });
+
+  it("rejects left members in new expenses", async () => {
+    const { alice, g, creator, zed } = await setupHistory();
+    await expect(alice.mutation(api.expenses.add, {
+      publicId: g.publicId, description: "New", amountCents: 100,
+      paidBy: zed._id, splits: [{ memberId: zed._id, amountCents: 100 }],
+      date: "2026-09-22", isSettlement: false,
+    })).rejects.toThrow(/has left/i);
+    await expect(alice.mutation(api.expenses.add, {
+      publicId: g.publicId, description: "New", amountCents: 200,
+      paidBy: creator._id, splits: [
+        { memberId: creator._id, amountCents: 100 },
+        { memberId: zed._id, amountCents: 100 },
+      ],
+      date: "2026-09-22", isSettlement: false,
+    })).rejects.toThrow(/has left/i);
+  });
+
+  it("allows edits that keep left references, blocks newly added ones", async () => {
+    const { alice, t, g, creator, zed } = await setupHistory();
+    const rows = (await t.query(api.expenses.list, { publicId: g.publicId }))
+      .filter((e) => !e.isSettlement);
+    // Rename-only edit keeps Zed's historical split: allowed.
+    await alice.mutation(api.expenses.update, {
+      publicId: g.publicId, expenseId: rows[0]._id, description: "Dinner (edited)",
+      amountCents: 2000, paidBy: creator._id,
+      splits: [
+        { memberId: creator._id, amountCents: 1000 },
+        { memberId: zed._id, amountCents: 1000 },
+      ],
+      date: "2026-09-20",
+    });
+    // Swapping Zed out is allowed too.
+    await alice.mutation(api.expenses.update, {
+      publicId: g.publicId, expenseId: rows[0]._id, description: "Dinner (edited)",
+      amountCents: 1000, paidBy: creator._id,
+      splits: [{ memberId: creator._id, amountCents: 1000 }],
+      date: "2026-09-20",
+    });
+    // Re-adding Zed to a fresh expense is rejected.
+    await expect(alice.mutation(api.expenses.add, {
+      publicId: g.publicId, description: "New", amountCents: 100,
+      paidBy: creator._id, splits: [{ memberId: zed._id, amountCents: 100 }],
+      date: "2026-09-22", isSettlement: false,
+    })).rejects.toThrow(/has left/i);
+  });
+
+  it("re-inviting and re-joining reactivate the same row", async () => {
+    const { alice, t, g, zed } = await setupHistory();
+    const again = await alice.mutation(api.members.add, {
+      publicId: g.publicId, email: "zed@x.co", name: "Zeddy",
+    });
+    expect(again._id).toEqual(zed._id);
+    let members = await t.query(api.members.list, { publicId: g.publicId });
+    expect(members.find((m) => m._id === zed._id)).toMatchObject({ status: "active", name: "Zeddy" });
+
+    // Leave again, then rejoin via join (no temp name → keeps row name).
+    await alice.mutation(api.members.remove, { publicId: g.publicId, memberId: zed._id });
+    const { authed: zedAuth } = await seedUser(t, { name: "Zeddy", email: "zed@x.co" });
+    const rejoined = await zedAuth.mutation(api.members.join, { publicId: g.publicId });
+    expect(rejoined._id).toEqual(zed._id);
+    members = await t.query(api.members.list, { publicId: g.publicId });
+    expect(members.filter((m) => m.email === "zed@x.co")).toHaveLength(1);
+    expect(members.find((m) => m._id === zed._id)?.status).toBe("active");
   });
 });

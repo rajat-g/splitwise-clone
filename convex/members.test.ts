@@ -237,7 +237,10 @@ describe("members.remove", () => {
     });
     await authed.mutation(api.members.remove, { publicId: g.publicId, memberId: bo._id });
     members = await t.query(api.members.list, { publicId: g.publicId });
-    expect(members.some((m) => m.email === "bo@example.com")).toBe(false);
+    // Soft delete: the row stays (history keeps resolving) with status left.
+    expect(members.find((m) => m.email === "bo@example.com")).toMatchObject({ status: "left" });
+    await expect(authed.mutation(api.members.remove, { publicId: g.publicId, memberId: bo._id }))
+      .rejects.toThrow(/already left/i);
   });
 
   it("rejects members from another group", async () => {

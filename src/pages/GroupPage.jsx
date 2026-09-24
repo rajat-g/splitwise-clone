@@ -285,13 +285,17 @@ export default function GroupPage() {
   const currency = renderGroup.currency || "$";
   const inviteLink = `${window.location.origin}/g/${publicId}`;
   // "You" in this group: the member linked to your account, or a pending
-  // invite matching your email (before the claim mutation lands).
+  // invite matching your email (before the claim mutation lands). Left
+  // members don't count — rejoin to write again.
   const viewerMember = viewer
-    ? (renderMembers.find((m) => m.userId && String(m.userId) === String(viewer._id))
+    ? (renderMembers.find((m) => m.userId && String(m.userId) === String(viewer._id) && m.status !== "left")
       ?? renderMembers.find(
         (m) => viewer.email && memberEmail(m) && memberEmail(m) === String(viewer.email).trim().toLowerCase()
+          && m.status !== "left"
       ) ?? null)
     : null;
+  // Active members transact; left members stay visible so history keeps names.
+  const activeMembers = renderMembers.filter((m) => m.status !== "left");
   // Write access = linked membership in THIS group. Signed-in outsiders with
   // the link can view everything but must join before they can transact.
   // The server re-checks membership on every mutation — this only gates UI.
@@ -554,8 +558,8 @@ export default function GroupPage() {
                   {renderGroup.name}
                 </h1>
                 <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-slate-500 dark:text-slate-400">
-                  <AvatarStack names={renderMembers.map((m) => displayOf(m))} />
-                  <span>{renderMembers.length} member{renderMembers.length === 1 ? "" : "s"}</span>
+                  <AvatarStack names={activeMembers.map((m) => displayOf(m))} />
+                  <span>{activeMembers.length} member{activeMembers.length === 1 ? "" : "s"}</span>
                   <span aria-hidden="true">·</span>
                   <span>{expenseCount} expense{expenseCount === 1 ? "" : "s"}</span>
                   {online ? <LiveDot /> : <Badge tone="neutral">Offline</Badge>}
@@ -638,7 +642,7 @@ export default function GroupPage() {
             ["debts", "Simplified Debts", Icon.Wallet, settlements.length],
             ["summary", "Summary", Icon.Receipt],
             ["insights", "Insights", Icon.Chart],
-            ["members", "Members", Icon.Users, renderMembers.length],
+            ["members", "Members", Icon.Users, activeMembers.length],
             ["activity", "Activity", Icon.Clock, renderActivity.length],
           ]}
         />
@@ -760,6 +764,7 @@ export default function GroupPage() {
                       <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
                         <span className="truncate">{displayOf(m)}</span>
                         {pending && <Badge tone="amber" className="!px-1.5 !py-0.5 !text-[10px]">invited</Badge>}
+                        {m.status === "left" && <Badge tone="neutral" className="!px-1.5 !py-0.5 !text-[10px]">left</Badge>}
                       </span>
                       <span className={`tnum shrink-0 text-sm font-bold ${
                         settled ? "text-slate-400 dark:text-slate-500"
@@ -802,7 +807,7 @@ export default function GroupPage() {
       {tab === "members" && (
         <div className="grid items-start gap-4 sm:gap-5 lg:grid-cols-[1.2fr_1fr]">
           <Card className="p-5 sm:p-6">
-            <SectionTitle title={`Members · ${renderMembers.length}`} sub={isMember ? "Invite by email — shows their name once they sign up." : "Members can invite, rename and remove. Join the group to manage members."} />
+            <SectionTitle title={`Members · ${activeMembers.length}`} sub={isMember ? "Invite by email — shows their name once they sign up." : "Members can invite, rename and remove. Join the group to manage members."} />
             {isMember ? (
             <form className="mt-4" onSubmit={handleAddMember} noValidate>
               <div className="grid gap-2.5 min-[520px]:grid-cols-[1.4fr_1fr_auto]">
@@ -843,9 +848,10 @@ export default function GroupPage() {
                 const editing = renamingId === id;
                 // Settle shortcut: member pays/is-paid against someone on the
                 // other side of zero; falls back to any other member.
-                const others = renderMembers.filter((x) => String(x._id ?? x.id) !== id);
+                // Left members never transact, so they stay out of both.
+                const others = renderMembers.filter((x) => String(x._id ?? x.id) !== id && x.status !== "left");
                 const counterpart = Math.abs(b) >= 0.005
-                  ? (renderMembers.find((x) => String(x._id ?? x.id) !== id && (b < 0 ? (balances[mid(x)] || 0) > 0.005 : (balances[mid(x)] || 0) < -0.005)) ?? others[0] ?? null)
+                  ? (others.find((x) => (b < 0 ? (balances[mid(x)] || 0) > 0.005 : (balances[mid(x)] || 0) < -0.005)) ?? others[0] ?? null)
                   : null;
                 return (
                   <li key={String(m._id)} className="flex items-center gap-3 py-2.5">
@@ -867,8 +873,9 @@ export default function GroupPage() {
                           <span className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-slate-800 dark:text-slate-100">
                             <span className="truncate">{displayOf(m)}</span>
                             {isYou && <Badge tone="teal" className="!px-1.5 !py-0.5 !text-[10px]">you</Badge>}
-                            {!isYou && isPendingInvite(m) && <Badge tone="amber" className="!px-1.5 !py-0.5 !text-[10px]">invited</Badge>}
-                            {!isYou && !isPendingInvite(m) && memberEmail(m) && <Badge tone="emerald" className="!px-1.5 !py-0.5 !text-[10px]">joined</Badge>}
+                            {!isYou && m.status === "left" && <Badge tone="neutral" className="!px-1.5 !py-0.5 !text-[10px]">left</Badge>}
+                            {!isYou && m.status !== "left" && isPendingInvite(m) && <Badge tone="amber" className="!px-1.5 !py-0.5 !text-[10px]">invited</Badge>}
+                            {!isYou && m.status !== "left" && !isPendingInvite(m) && memberEmail(m) && <Badge tone="emerald" className="!px-1.5 !py-0.5 !text-[10px]">joined</Badge>}
                           </span>
                           <span className="mt-0.5 block truncate text-xs text-slate-400 dark:text-slate-500">
                             {memberEmail(m) && displayOf(m) !== memberEmail(m)
@@ -881,7 +888,7 @@ export default function GroupPage() {
                               : <span> · added {timeAgo(m.createdAt)}</span>}
                           </span>
                         </span>
-                        {isMember && (
+                        {isMember && m.status !== "left" && (
                           <span className="flex shrink-0 items-center gap-1">
                             <button aria-label={`Rename ${displayOf(m)}`} title={memberEmail(m) ? `Rename display name (email stays ${memberEmail(m)})` : "Rename"}
                               onClick={() => startRename(m)}
@@ -983,15 +990,15 @@ export default function GroupPage() {
 
       {showExpense && isMember && (
         <ExpenseModal
-          members={renderMembers} currency={currency}
-          initial={editing ? expenseToForm(editing) : null}
+          members={activeMembers} currency={currency}
+          initial={editing ? { ...expenseToForm(editing), paidByName: nameOf(editing.paidBy) } : null}
           saving={saving}
           onClose={() => { setShowExpense(false); setEditing(null); }}
           onSave={handleSaveExpense}
         />
       )}
       {showSettle && isMember && (
-        <SettleModal members={renderMembers} balances={balances} currency={currency} saving={saving}
+        <SettleModal members={activeMembers} balances={balances} currency={currency} saving={saving}
           initial={settlePrefill} onClose={closeSettle} onSave={handleSettle} />
       )}
       {authOpen && <AuthDialog onClose={() => setAuthOpen(false)} />}

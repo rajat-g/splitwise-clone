@@ -38,8 +38,14 @@ const members = [
   { _id: "m1", name: "Ada", email: "ada@x.co", userId: "u1", createdAt: NOW - 5000 },
   { _id: "m2", name: "bo@x.co", email: "bo@x.co", createdAt: NOW - 4000 },
   { _id: "m3", name: "Cy", email: "cy@x.co", userId: "u3", createdAt: NOW - 3000 },
+  { _id: "m4", name: "Dan", email: "dan@x.co", userId: "u4", status: "left", createdAt: NOW - 9000 },
 ];
 const expenses = [
+  {
+    _id: "e0", description: "Old taxi", amountCents: 6000, paidBy: "m4", date: "2026-01-05",
+    category: "transport", splitMode: "equal", isSettlement: false, createdByName: "Dan",
+    splits: [{ memberId: "m4", amountCents: 6000 }],
+  },
   {
     _id: "e1", description: "Dinner", amountCents: 10000, paidBy: "m1", date: "2026-09-20",
     category: "food", splitMode: "equal", isSettlement: false, createdByName: "Ada",
@@ -133,6 +139,10 @@ describe("GroupPage as guest", () => {
     expect(screen.getByText(/viewing as a guest/i)).toBeInTheDocument();
     expect(screen.getByText("Dinner")).toBeInTheDocument();
     expect(screen.getAllByText("Food & Drinks")).toHaveLength(2); // list badge + filter option
+    // Historical expenses keep resolving left members instead of "Unknown".
+    expect(screen.getByText("Old taxi")).toBeInTheDocument();
+    expect(screen.getByText(/dan paid/i)).toBeInTheDocument();
+    expect(screen.queryByText("Unknown")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /sign in to add$/i }));
     expect(screen.getByText("Welcome back")).toBeInTheDocument();
   });
@@ -571,6 +581,40 @@ describe("GroupPage edge paths", () => {
     await waitFor(() => expect(screen.getByText(/belong to another account/i)).toBeInTheDocument());
     expect(mutations.addExpense).not.toHaveBeenCalled();
     expect(getOutbox()).toHaveLength(1);
+  });
+
+  it("shows left members read-only and excludes them from new splits", async () => {
+    mockAuthed();
+    renderPage();
+    fireEvent.click(tab(5));
+    // Dan's row carries a left badge and no action buttons.
+    expect(screen.getByText("left")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Rename Dan" })).not.toBeInTheDocument();
+    const removes = screen.getAllByRole("button", { name: "Remove" });
+    expect(removes).toHaveLength(2); // Bo and Cy only
+
+    // New expenses can't pick Dan…
+    fireEvent.click(tab(0));
+    fireEvent.click(screen.getAllByRole("button", { name: "Add expense" })[0]);
+    let dialog = within(screen.getByRole("dialog"));
+    expect(dialog.queryByText("Dan")).not.toBeInTheDocument();
+    fireEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+
+    // …but editing his historical expense keeps him visible and saving works.
+    fireEvent.click(screen.getByRole("button", { name: "Edit Old taxi" }));
+    dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByText("Dan (left)")).toBeInTheDocument();
+    fireEvent.click(dialog.getByRole("button", { name: /save changes/i }));
+    await waitFor(() => expect(mutations.updateExpense).toHaveBeenCalledWith(
+      expect.objectContaining({ expenseId: "e0", paidBy: "m4" })
+    ));
+  });
+
+  it("asks left members to rejoin instead of treating them as members", () => {
+    mockAuthed({ _id: "u4", name: "Dan", email: "dan@x.co" });
+    renderPage();
+    expect(screen.getByText(/not a member of this group yet/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add expense" })).not.toBeInTheDocument();
   });
 });
 

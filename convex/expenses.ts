@@ -123,6 +123,17 @@ export const add = mutation({
     for (const s of args.splits) {
       if (!members.has(String(s.memberId))) throw new Error("A split member is not in this group.");
     }
+    // Left members stay in history but can't join NEW expenses.
+    const leftName = (id: string) => {
+      const m = members.get(String(id)) as { status?: unknown; name?: unknown } | undefined;
+      return m && m.status === "left" ? m.name : null;
+    };
+    const leftPaid = leftName(String(args.paidBy));
+    if (leftPaid) throw new Error(`${leftPaid} has left the group and can't be part of new expenses.`);
+    for (const s of args.splits) {
+      const ln = leftName(String(s.memberId));
+      if (ln) throw new Error(`${ln} has left the group and can't be part of new expenses.`);
+    }
     const description = validateExpenseInput({
       description: args.description, amountCents: args.amountCents,
       paidBy: String(args.paidBy),
@@ -175,6 +186,15 @@ export const update = mutation({
     if (!members.has(String(args.paidBy))) throw new Error("Payer is not a member.");
     for (const s of args.splits) {
       if (!members.has(String(s.memberId))) throw new Error("A split member is not in this group.");
+    }
+    // Edits keep working on historical expenses: left members already on the
+    // expense stay untouched, but newly adding one is rejected.
+    const oldIds = new Set([String(exp.paidBy), ...exp.splits.map((s) => String(s.memberId))]);
+    for (const id of [String(args.paidBy), ...args.splits.map((s) => String(s.memberId))]) {
+      const m = members.get(id) as { status?: unknown; name?: unknown } | undefined;
+      if (m && m.status === "left" && !oldIds.has(id)) {
+        throw new Error(`${m.name} has left the group and can't be added to expenses.`);
+      }
     }
     const description = validateExpenseInput({
       description: args.description, amountCents: args.amountCents,
