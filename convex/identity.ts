@@ -1,17 +1,19 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
+import type { Doc } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
 
 // Single source of truth for "who did this". Every write mutation already
 // requires auth, so attribution is derived from the session — never from a
 // client-supplied name (those are spoofable). Display names shown to friends
 // are group members; this name is only the activity-feed author.
-export async function resolveActorName(ctx: any): Promise<string> {
+export async function resolveActorName(ctx: MutationCtx): Promise<string> {
   try {
     const userId = await getAuthUserId(ctx);
     if (!userId) return "Someone";
     const user = await ctx.db.get(userId);
-    const name = (user as { name?: unknown }).name;
+    const name = user?.name;
     if (typeof name === "string" && name.trim()) return name.trim().slice(0, 30);
-    const email = (user as { email?: unknown }).email;
+    const email = user?.email;
     if (typeof email === "string" && email.includes("@")) {
       return email.split("@")[0].slice(0, 30) || "Someone";
     }
@@ -26,9 +28,6 @@ export async function resolveActorName(ctx: any): Promise<string> {
  * address via OTP; unverified (and legacy never-verified) accounts fail
  * this check, so group invites can never attach to an unproven address.
  */
-export function userEmailVerified(user: unknown): boolean {
-  return (
-    !!user &&
-    typeof (user as { emailVerificationTime?: unknown }).emailVerificationTime === "number"
-  );
+export function userEmailVerified(user: Doc<"users"> | null): boolean {
+  return !!user && typeof user.emailVerificationTime === "number";
 }

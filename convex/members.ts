@@ -1,23 +1,10 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { resolveActorName, userEmailVerified } from "./identity";
-import { requireGroupMember } from "./authz";import type { Id } from "./_generated/dataModel";
-
-async function requireAuth(ctx: any) {
-  const userId = await getAuthUserId(ctx);
-  if (!userId) throw new Error("Sign in to make changes. Guests can view only.");
-  return userId;
-}
-
-async function groupByPublicId(ctx: any, publicId: string) {
-  const g = await ctx.db
-    .query("groups")
-    .withIndex("by_publicId", (q: any) => q.eq("publicId", publicId))
-    .first();
-  if (!g) throw new Error("Group not found. Check your invite link.");
-  return g;
-}
+import { groupByPublicId, requireAuth, requireGroupMember } from "./authz";
 
 function cleanMemberName(raw: unknown) {
   const name = String(raw ?? "").trim();
@@ -37,20 +24,20 @@ function cleanEmail(raw: unknown): string {
   return email;
 }
 
-function emailsEqual(a: unknown, b: unknown) {
-  return String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
+function emailsEqual(a: string, b: string) {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
-function isLeft(m: unknown) {
-  return ((m as { status?: unknown }).status as string | undefined) === "left";
+function isLeft(m: Pick<Doc<"members">, "status">) {
+  return m.status === "left";
 }
 
 /** Best-effort lookup of a registered user by email (for instant name + link). */
-async function findUserByEmail(ctx: any, email: string) {
+async function findUserByEmail(ctx: MutationCtx, email: string): Promise<Doc<"users"> | null> {
   try {
     const user = await ctx.db
       .query("users")
-      .filter((q: any) => q.eq(q.field("email"), email))
+      .filter((q) => q.eq(q.field("email"), email))
       .first();
     return user ?? null;
   } catch {
@@ -58,8 +45,8 @@ async function findUserByEmail(ctx: any, email: string) {
   }
 }
 
-function profileNameOf(user: any, fallbackEmail: string) {
-  const n = (user as { name?: unknown }).name;
+function profileNameOf(user: Doc<"users">, fallbackEmail: string) {
+  const n = user.name;
   if (typeof n === "string" && n.trim()) return n.trim().slice(0, MAX_MEMBER_NAME);
   return fallbackEmail.split("@")[0].slice(0, MAX_MEMBER_NAME) || fallbackEmail;
 }
@@ -94,8 +81,8 @@ export const list = query({
     let isMember = false;
     if (userId) {
       const user = await ctx.db.get(userId);
-      viewerEmail = (((user as { email?: unknown } | null)?.email as string | undefined) ?? "").trim().toLowerCase();
-      isMember = rows.some((m) => (m as { userId?: unknown }).userId && String((m as { userId?: unknown }).userId) === String(userId));
+      viewerEmail = (user?.email ?? "").trim().toLowerCase();
+      isMember = rows.some((m) => m.userId !== undefined && m.userId === userId);
     }
     return rows.map((m) => {
       const { deviceId: _device, ...rest } = m;
@@ -145,19 +132,18 @@ export const add = mutation({
       }
       // Already invited? Return the existing row (idempotent) — reactivating
       // it when it belongs to someone who left.
-      const dupEmail = existing.find((m) => typeof (m as { email?: unknown }).email === "string" && emailsEqual((m as { email?: unknown }).email, email));
+      const dupEmail = existing.find((m) => typeof m.email === "string" && emailsEqual(m.email, email));
       if (dupEmail) {
         if (isLeft(dupEmail)) {
-          const patch: Record<string, unknown> = { status: "active" };
-          if (tempName) patch.name = tempName;
-          await ctx.db.patch(dupEmail._id, patch as never);
+          const name = tempName || dupEmail.name;
+          await ctx.db.patch(dupEmail._id, { status: "active", ...(tempName ? { name: tempName } : {}) });
           const now = Date.now();
           await ctx.db.insert("activity", {
             groupId: g._id, type: "member_joined",
-            text: `${(patch.name ?? dupEmail.name) as string} rejoined the group`,
-            actorName: (patch.name ?? dupEmail.name) as string, createdAt: now,
+            text: `${name} rejoined the group`,
+            actorName: name, createdAt: now,
           });
-          return { _id: dupEmail._id, name: (patch.name ?? dupEmail.name) as string };
+          return { _id: dupEmail._id, name };
         }
         return { _id: dupEmail._id, name: dupEmail.name };
       }
@@ -166,8 +152,7 @@ export const add = mutation({
       // their real name. Unverified matches stay pending: an unproven email
       // string must never confer membership.
       const linkedUser = await findUserByEmail(ctx, email);
-      const linkedUserId =
-        linkedUser && userEmailVerified(linkedUser) ? (linkedUser._id as Id<"users">) : null;
+      const linkedUserId = linkedUser && userEmailVerified(linkedUser) ? linkedUser._id : null;
       // No temp name? Fall back to the email prefix ("priya"), never the
       // full address — the row subtitle already shows the email, and claim
       // upgrades prefix displays to the real name on signup.
@@ -176,14 +161,12 @@ export const add = mutation({
         : tempName || email.split("@")[0] || email;
 
       const now = Date.now();
-      const doc: Record<string, unknown> = {
+      const doc = {
         groupId: g._id, name: display, email, createdAt: now,
+        ...(args.deviceId ? { deviceId: args.deviceId } : {}),
+        ...(linkedUserId ? { userId: linkedUserId } : {}),
       };
-      if (args.deviceId) doc.deviceId = args.deviceId;
-      if (linkedUserId) doc.userId = linkedUserId;
-      const _id = await ctx.db.insert("members", doc as never);
-      const actor = await resolveActorName(ctx);
-      void actor;
+      const _id = await ctx.db.insert("members", doc);
       const detail = display !== email ? ` (${email})` : "";
       await ctx.db.insert("activity", {
         groupId: g._id, type: "member_added",
@@ -226,7 +209,7 @@ export const join = mutation({
     const userId = await requireAuth(ctx);
     const g = await groupByPublicId(ctx, args.publicId);
     const existing = await ctx.db.query("members").withIndex("by_group", (q) => q.eq("groupId", g._id)).collect();
-    const linked = existing.find((m) => (m as { userId?: unknown }).userId && String((m as { userId?: unknown }).userId) === String(userId));
+    const linked = existing.find((m) => m.userId !== undefined && m.userId === userId);
     if (linked) {
       // Rejoining after leaving reactivates the historical row (history kept).
       if (isLeft(linked)) {
@@ -241,7 +224,7 @@ export const join = mutation({
     }
 
     const user = await ctx.db.get(userId);
-    const email = ((user as { email?: unknown } | null)?.email as string | undefined ?? "").trim().toLowerCase();
+    const email = (user?.email ?? "").trim().toLowerCase();
     const realName = user ? profileNameOf(user, email || "member") : "Member";
 
     // Pending email invite for this address? Link it instead of duplicating —
@@ -249,34 +232,34 @@ export const join = mutation({
     // merge later, once verified, via claim.
     if (email && userEmailVerified(user)) {
       const pending = existing.find(
-        (m) => (((m as { email?: unknown }).email as string | undefined) ?? "").toLowerCase() === email
-          && !(m as { userId?: unknown }).userId
+        (m) => (m.email ?? "").toLowerCase() === email && m.userId === undefined
       );
       if (pending) {
-        const patch: Record<string, unknown> = { userId, status: "active" };
-        const pEmail = (((pending as { email?: unknown }).email as string | undefined) ?? "").toLowerCase();
+        const pEmail = (pending.email ?? "").toLowerCase();
+        const patch: { userId: Id<"users">; status: string; name?: string } = { userId, status: "active" };
         if (!pending.name || pending.name === pEmail || pending.name === pEmail.split("@")[0]) {
           patch.name = realName;
         }
-        await ctx.db.patch(pending._id, patch as never);
+        await ctx.db.patch(pending._id, patch);
         const now = Date.now();
+        const joinedName = patch.name ?? pending.name;
         await ctx.db.insert("activity", {
           groupId: g._id, type: "member_joined",
-          text: `${(patch.name ?? pending.name) as string} joined the group`,
+          text: `${joinedName} joined the group`,
           actorName: realName, createdAt: now,
         });
-        return { _id: pending._id, name: (patch.name ?? pending.name) as string };
+        return { _id: pending._id, name: joinedName };
       }
     }
 
     if (existing.length >= MAX_MEMBERS_PER_GROUP) throw new Error(`Groups are capped at ${MAX_MEMBERS_PER_GROUP} members.`);
     const now = Date.now();
-    const doc: Record<string, unknown> = {
+    const doc = {
       groupId: g._id, name: realName, createdAt: now, userId,
+      ...(email ? { email } : {}),
+      ...(args.deviceId ? { deviceId: args.deviceId } : {}),
     };
-    if (email) doc.email = email;
-    if (args.deviceId) doc.deviceId = args.deviceId;
-    const _id = await ctx.db.insert("members", doc as never);
+    const _id = await ctx.db.insert("members", doc);
     await ctx.db.insert("activity", {
       groupId: g._id, type: "member_joined",
       text: `${realName} joined the group`, actorName: realName, createdAt: now,
@@ -298,7 +281,7 @@ export const claim = mutation({
     const g = await groupByPublicId(ctx, args.publicId);
     const user = await ctx.db.get(userId);
     if (!user) return { claimed: 0 };
-    const email = ((user as { email?: unknown }).email as string | undefined ?? "").trim().toLowerCase();
+    const email = (user.email ?? "").trim().toLowerCase();
     if (!email || !EMAIL_RE.test(email)) return { claimed: 0 };
     // Linking by email string requires mailbox proof — unverified accounts
     // (including legacy never-verified ones) must verify first.
@@ -308,9 +291,9 @@ export const claim = mutation({
     const members = await ctx.db.query("members").withIndex("by_group", (q) => q.eq("groupId", g._id)).collect();
     let claimed = 0;
     for (const m of members) {
-      const mEmail = ((m as { email?: unknown }).email as string | undefined ?? "").trim().toLowerCase();
+      const mEmail = (m.email ?? "").trim().toLowerCase();
       if (!mEmail || mEmail !== email) continue;
-      if ((m as { userId?: unknown }).userId && String((m as { userId?: unknown }).userId) === String(userId)) {
+      if (m.userId !== undefined && m.userId === userId) {
         // Already linked — still upgrade an email-fallback display name.
         if (m.name === mEmail || m.name === mEmail.split("@")[0]) {
           await ctx.db.patch(m._id, { name: realName });
@@ -318,13 +301,13 @@ export const claim = mutation({
         }
         continue;
       }
-      if ((m as { userId?: unknown }).userId) continue; // claimed by someone else
-      const patch: Record<string, unknown> = { userId, status: "active" };
+      if (m.userId !== undefined) continue; // claimed by someone else
+      const patch: { userId: Id<"users">; status: string; name?: string } = { userId, status: "active" };
       // No custom temp name? Show the real name now (clean UI).
       if (!m.name || m.name === mEmail || m.name === mEmail.split("@")[0] || m.name.toLowerCase() === mEmail) {
         patch.name = realName;
       }
-      await ctx.db.patch(m._id, patch as never);
+      await ctx.db.patch(m._id, patch);
       claimed += 1;
     }
     if (claimed > 0) {
@@ -351,11 +334,11 @@ export const rename = mutation({
     // Same display name is OK when rows are distinct email invites (the email
     // subtitle disambiguates). It stays blocked for legacy name-only rows and
     // for rows sharing the same email.
-    const memberEmail = (((member as { email?: unknown }).email as string | undefined) ?? "").toLowerCase();
+    const memberEmail = (member.email ?? "").toLowerCase();
     const dup = existing.find((m) => {
-      if (String(m._id) === String(args.memberId)) return false;
+      if (m._id === args.memberId) return false;
       if (m.name.toLowerCase() !== name.toLowerCase()) return false;
-      const otherEmail = (((m as { email?: unknown }).email as string | undefined) ?? "").toLowerCase();
+      const otherEmail = (m.email ?? "").toLowerCase();
       if (memberEmail && otherEmail && memberEmail !== otherEmail) return false;
       return true;
     });
@@ -388,13 +371,13 @@ export const remove = mutation({
     let bal = 0;
     for (const e of expenses) {
       if (e.isSettlement) {
-        if (String(e.paidBy) === String(args.memberId)) bal += e.amountCents;
+        if (e.paidBy === args.memberId) bal += e.amountCents;
         const recv = e.splits[0];
-        if (recv && String(recv.memberId) === String(args.memberId)) bal -= recv.amountCents;
+        if (recv && recv.memberId === args.memberId) bal -= recv.amountCents;
       } else {
-        if (String(e.paidBy) === String(args.memberId)) bal += e.amountCents;
+        if (e.paidBy === args.memberId) bal += e.amountCents;
         for (const s of e.splits) {
-          if (String(s.memberId) === String(args.memberId)) bal -= s.amountCents;
+          if (s.memberId === args.memberId) bal -= s.amountCents;
         }
       }
     }
@@ -402,8 +385,7 @@ export const remove = mutation({
     // Soft delete: the row stays so historical expenses keep resolving names.
     // Only active members transact — the UI hides left members from new
     // splits and the server rejects them there.
-    const self = (member as { userId?: unknown }).userId
-      && String((member as { userId?: unknown }).userId) === String(callerId);
+    const self = member.userId !== undefined && member.userId === callerId;
     await ctx.db.patch(args.memberId, { status: "left" });
     await ctx.db.insert("activity", {
       groupId: g._id, type: "member_removed",

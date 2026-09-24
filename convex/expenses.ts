@@ -1,7 +1,9 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
 import { resolveActorName } from "./identity";
-import { requireGroupMember } from "./authz";
+import { groupByPublicId, requireGroupMember } from "./authz";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_CENTS = 1_000_000_00; // $1M cap per expense
@@ -27,23 +29,16 @@ function normalizeSplitMode(raw: unknown): string {
   throw new Error("Invalid split type.");
 }
 
-async function groupByPublicId(ctx: any, publicId: string) {
-  const g = await ctx.db
-    .query("groups")
-    .withIndex("by_publicId", (q: any) => q.eq("publicId", publicId))
-    .first();
-  if (!g) throw new Error("Group not found. Check your invite link.");
-  return g;
+async function memberMap(ctx: MutationCtx, groupId: Id<"groups">) {
+  const members = await ctx.db.query("members").withIndex("by_group", (q) => q.eq("groupId", groupId)).collect();
+  return new Map(members.map((m) => [m._id, m] as const));
 }
 
-async function memberMap(ctx: any, groupId: any) {
-  const members = await ctx.db.query("members").withIndex("by_group", (q: any) => q.eq("groupId", groupId)).collect();
-  return new Map(members.map((m: any) => [String(m._id), m]));
-}
+type SplitInput = { memberId: Id<"members">; amountCents: number };
 
 function validateExpenseInput(args: {
-  description: string; amountCents: number; paidBy: string;
-  splits: { memberId: string; amountCents: number }[];
+  description: string; amountCents: number; paidBy: Id<"members">;
+  splits: SplitInput[];
   date: string; isSettlement: boolean;
 }) {
   const description = (args.description || "").trim().slice(0, 140);
@@ -116,34 +111,34 @@ export const add = mutation({
         .query("expenses")
         .withIndex("by_clientId", (q) => q.eq("clientId", args.clientId))
         .first();
-      if (dup && String(dup.groupId) === String(g._id)) return { _id: dup._id };
+      if (dup && dup.groupId === g._id) return { _id: dup._id };
     }
     const members = await memberMap(ctx, g._id);
-    if (!members.has(String(args.paidBy))) throw new Error("Payer is not a member of this group.");
+    if (!members.has(args.paidBy)) throw new Error("Payer is not a member of this group.");
     for (const s of args.splits) {
-      if (!members.has(String(s.memberId))) throw new Error("A split member is not in this group.");
+      if (!members.has(s.memberId)) throw new Error("A split member is not in this group.");
     }
     // Left members stay in history but can't join NEW expenses.
-    const leftName = (id: string) => {
-      const m = members.get(String(id)) as { status?: unknown; name?: unknown } | undefined;
+    const leftName = (id: Id<"members">) => {
+      const m = members.get(id);
       return m && m.status === "left" ? m.name : null;
     };
-    const leftPaid = leftName(String(args.paidBy));
+    const leftPaid = leftName(args.paidBy);
     if (leftPaid) throw new Error(`${leftPaid} has left the group and can't be part of new expenses.`);
     for (const s of args.splits) {
-      const ln = leftName(String(s.memberId));
+      const ln = leftName(s.memberId);
       if (ln) throw new Error(`${ln} has left the group and can't be part of new expenses.`);
     }
     const description = validateExpenseInput({
       description: args.description, amountCents: args.amountCents,
-      paidBy: String(args.paidBy),
-      splits: args.splits.map((s) => ({ memberId: String(s.memberId), amountCents: s.amountCents })),
+      paidBy: args.paidBy,
+      splits: args.splits.map((s) => ({ memberId: s.memberId, amountCents: s.amountCents })),
       date: args.date, isSettlement: args.isSettlement,
     });
     const actor = await resolveActorName(ctx);
     const now = Date.now();
     const category = args.isSettlement ? undefined : normalizeCategory(args.category);
-    const splitMode = args.isSettlement ? undefined : normalizeSplitMode((args as { splitMode?: unknown }).splitMode);
+    const splitMode = args.isSettlement ? undefined : normalizeSplitMode(args.splitMode);
     const _id = await ctx.db.insert("expenses", {
       groupId: g._id, description, amountCents: args.amountCents, paidBy: args.paidBy,
       splits: args.splits, date: args.date, isSettlement: args.isSettlement,
@@ -180,31 +175,31 @@ export const update = mutation({
     const g = await groupByPublicId(ctx, args.publicId);
     await requireGroupMember(ctx, g._id);
     const exp = await ctx.db.get(args.expenseId);
-    if (!exp || String(exp.groupId) !== String(g._id)) throw new Error("Expense not found.");
+    if (!exp || exp.groupId !== g._id) throw new Error("Expense not found.");
     if (exp.isSettlement) throw new Error("Settlements cannot be edited — delete and re-record.");
     const members = await memberMap(ctx, g._id);
-    if (!members.has(String(args.paidBy))) throw new Error("Payer is not a member.");
+    if (!members.has(args.paidBy)) throw new Error("Payer is not a member.");
     for (const s of args.splits) {
-      if (!members.has(String(s.memberId))) throw new Error("A split member is not in this group.");
+      if (!members.has(s.memberId)) throw new Error("A split member is not in this group.");
     }
     // Edits keep working on historical expenses: left members already on the
     // expense stay untouched, but newly adding one is rejected.
-    const oldIds = new Set([String(exp.paidBy), ...exp.splits.map((s) => String(s.memberId))]);
-    for (const id of [String(args.paidBy), ...args.splits.map((s) => String(s.memberId))]) {
-      const m = members.get(id) as { status?: unknown; name?: unknown } | undefined;
+    const oldIds = new Set([exp.paidBy, ...exp.splits.map((s) => s.memberId)]);
+    for (const id of [args.paidBy, ...args.splits.map((s) => s.memberId)]) {
+      const m = members.get(id);
       if (m && m.status === "left" && !oldIds.has(id)) {
         throw new Error(`${m.name} has left the group and can't be added to expenses.`);
       }
     }
     const description = validateExpenseInput({
       description: args.description, amountCents: args.amountCents,
-      paidBy: String(args.paidBy),
-      splits: args.splits.map((s) => ({ memberId: String(s.memberId), amountCents: s.amountCents })),
+      paidBy: args.paidBy,
+      splits: args.splits.map((s) => ({ memberId: s.memberId, amountCents: s.amountCents })),
       date: args.date, isSettlement: false,
     });
     const actor = await resolveActorName(ctx);
     const category = normalizeCategory(args.category);
-    const splitMode = normalizeSplitMode((args as { splitMode?: unknown }).splitMode);
+    const splitMode = normalizeSplitMode(args.splitMode);
     await ctx.db.patch(args.expenseId, {
       description, amountCents: args.amountCents, paidBy: args.paidBy,
       splits: args.splits, date: args.date, category, splitMode, updatedAt: Date.now(),
@@ -223,7 +218,7 @@ export const remove = mutation({
     const g = await groupByPublicId(ctx, args.publicId);
     await requireGroupMember(ctx, g._id);
     const exp = await ctx.db.get(args.expenseId);
-    if (!exp || String(exp.groupId) !== String(g._id)) throw new Error("Expense not found.");
+    if (!exp || exp.groupId !== g._id) throw new Error("Expense not found.");
     const actor = await resolveActorName(ctx);
     await ctx.db.delete(args.expenseId);
     await ctx.db.insert("activity", {

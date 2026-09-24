@@ -1,8 +1,9 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import type { MutationCtx } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { resolveActorName } from "./identity";
-import { requireGroupOwner } from "./authz";
+import { groupByPublicId, requireAuth, requireGroupOwner } from "./authz";
 
 const PUBLIC_ID_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
 const PUBLIC_ID_LEN = 21;
@@ -38,10 +39,10 @@ function normalizeCode(raw: string) {
   return (raw || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 16);
 }
 
-async function uniqueCode(ctx: any) {
+async function uniqueCode(ctx: MutationCtx) {
   for (let i = 0; i < 10; i++) {
     const cand = secureRandomString(CODE_ALPHABET, CODE_LEN);
-    const exists = await ctx.db.query("groups").withIndex("by_inviteCode", (q: any) => q.eq("inviteCode", cand)).first();
+    const exists = await ctx.db.query("groups").withIndex("by_inviteCode", (q) => q.eq("inviteCode", cand)).first();
     if (!exists) return cand;
   }
   throw new Error("Could not generate invite code, try again.");
@@ -49,12 +50,6 @@ async function uniqueCode(ctx: any) {
 
 function cleanName(n: string) {
   return (n || "").trim().slice(0, 80);
-}
-
-async function requireAuth(ctx: any) {
-  const userId = await getAuthUserId(ctx);
-  if (!userId) throw new Error("Sign in to make changes. Guests can view only.");
-  return userId;
 }
 
 /** Create group + creator member. Server generates secrets = no collisions, no client trust. */
@@ -84,16 +79,17 @@ export const create = mutation({
 
     const now = Date.now();
     const owner = await ctx.db.get(ownerUserId);
-    const ownerEmail = String((owner as { email?: unknown } | null)?.email ?? "").trim().toLowerCase() || undefined;
+    const ownerEmail = (owner?.email ?? "").trim().toLowerCase() || undefined;
     const groupId = await ctx.db.insert("groups", {
       publicId, name, currency: args.currency, inviteCode,
       createdByName: creatorName, createdAt: now, ownerUserId,
     });
     await ctx.db.insert("members", {
-      groupId, name: creatorName, deviceId: args.deviceId, userId: ownerUserId,
+      groupId, name: creatorName, userId: ownerUserId,
+      ...(args.deviceId ? { deviceId: args.deviceId } : {}),
       ...(ownerEmail ? { email: ownerEmail } : {}),
       createdAt: now,
-    } as never);
+    });
     await ctx.db.insert("activity", {
       groupId, type: "group_created",
       text: `${creatorName} created group "${name}"`,
@@ -162,8 +158,7 @@ export const myGroups = query({
 export const rotateCode = mutation({
   args: { publicId: v.string() },
   handler: async (ctx, args) => {
-    const g = await ctx.db.query("groups").withIndex("by_publicId", (q) => q.eq("publicId", args.publicId)).first();
-    if (!g) throw new Error("Group not found.");
+    const g = await groupByPublicId(ctx, args.publicId);
     await requireGroupOwner(ctx, g);
     const actor = await resolveActorName(ctx);
     const inviteCode = await uniqueCode(ctx);
