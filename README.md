@@ -30,7 +30,17 @@ npm run dev           # http://localhost:5173
 
 ## Auth setup (one time, free, required for writes)
 
-All mutations (create group, expenses, settlements, members, rotate code) require sign-in — enforced server-side. Queries (view group, expenses, balances, activity) stay public so guests can view via link.
+Authentication (who you are) is not authorization (what you may touch). Every group mutation enforces **linked membership in that group** server-side (`convex/authz.ts`) — knowing a group link is never enough to write. Queries (view group, expenses, balances, activity) stay public so guests can view via link.
+
+| Operation | Guest | Group member | Owner |
+|---|---|---|---|
+| View everything | ✅ | ✅ | ✅ |
+| Join the group | ❌ (sign in first) | — (already in) | — |
+| Add / edit / delete expense, settle up | ❌ | ✅ | ✅ |
+| Invite, rename, remove members | ❌ | ✅ | ✅ |
+| Rotate invite code | ❌ | ❌ | ✅ |
+
+Membership = a `members` row in that group linked to your account. It is established at group creation (creator), at invite time (email matches an account), on invite claim, or via Join. Invite-code rotation is owner-only because it controls sharing.
 
 One command (Windows, macOS, Linux) — generates the keys and sets them, no copy-paste:
 
@@ -49,7 +59,7 @@ Account behavior:
 
 - Sign in/up from the header button. Sign-up fields: name, email, password (min 8 chars).
 - Groups get `ownerUserId` and appear under **My groups** on Home, on any device.
-- Guests opening an invite link can view balances, expenses, members, activity — add/edit/delete buttons are hidden and the backend rejects writes with "Sign in to make changes."
+- Guests opening an invite link can view balances, expenses, members, activity — write controls are hidden and the backend rejects writes ("Sign in to make changes." for guests, "You are not a member of this group." for signed-in outsiders). Signed-in outsiders see a Join prompt.
 - No email verification or password reset wired. Adding reset needs an email sender (e.g. Resend free tier) — ask if you want it.
 
 ## Offline mode
@@ -139,7 +149,7 @@ npm run coverage   # with coverage report (thresholds: 90% lines/functions/state
 
 - Backend (`convex/*.test.ts`): real function executions via `convex-test` (edge runtime), including auth flows with seeded users.
 - Frontend (`src/**/*.test.{js,jsx}`): jsdom + Testing Library with mocked Convex hooks.
-- 246 tests covering splits math, debt simplification, offline queue/sync, members, expenses, groups, auth, categories, and every page/component.
+- 250+ tests covering splits math, debt simplification, offline queue/sync, members, expenses, groups, auth, authorization matrix, categories, and every page/component.
 
 ## Troubleshooting
 

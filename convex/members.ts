@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { resolveActorName } from "./identity";
+import { requireGroupMember } from "./authz";
 import type { Id } from "./_generated/dataModel";
 
 async function requireAuth(ctx: any) {
@@ -84,6 +85,9 @@ export const add = mutation({
   handler: async (ctx, args) => {
     await requireAuth(ctx);
     const g = await groupByPublicId(ctx, args.publicId);
+    // Inviting requires membership in THIS group — a signed-in outsider with
+    // the link can view, but cannot add people. (Joining is members.join.)
+    await requireGroupMember(ctx, g._id);
     const existing = await ctx.db.query("members").withIndex("by_group", (q) => q.eq("groupId", g._id)).collect();
     if (existing.length >= MAX_MEMBERS_PER_GROUP) throw new Error(`Groups are capped at ${MAX_MEMBERS_PER_GROUP} members.`);
 
@@ -136,6 +140,63 @@ export const add = mutation({
       groupId: g._id, type: "member_added", text: `${name} joined the group`, actorName: name, createdAt: now,
     });
     return { _id, name };
+  },
+});
+
+/**
+ * Join a group as the signed-in user. This is how a link-opener becomes a
+ * member with write access: idempotent, links a pending email invite when
+ * one matches, otherwise creates a linked member row from the profile.
+ */
+export const join = mutation({
+  args: { publicId: v.string(), deviceId: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const userId = await requireAuth(ctx);
+    const g = await groupByPublicId(ctx, args.publicId);
+    const existing = await ctx.db.query("members").withIndex("by_group", (q) => q.eq("groupId", g._id)).collect();
+    const linked = existing.find((m) => (m as { userId?: unknown }).userId && String((m as { userId?: unknown }).userId) === String(userId));
+    if (linked) return { _id: linked._id, name: linked.name };
+
+    const user = await ctx.db.get(userId);
+    const email = ((user as { email?: unknown } | null)?.email as string | undefined ?? "").trim().toLowerCase();
+    const realName = user ? profileNameOf(user, email || "member") : "Member";
+
+    // Pending email invite for this address? Link it instead of duplicating.
+    if (email) {
+      const pending = existing.find(
+        (m) => (((m as { email?: unknown }).email as string | undefined) ?? "").toLowerCase() === email
+          && !(m as { userId?: unknown }).userId
+      );
+      if (pending) {
+        const patch: Record<string, unknown> = { userId };
+        const pEmail = (((pending as { email?: unknown }).email as string | undefined) ?? "").toLowerCase();
+        if (!pending.name || pending.name === pEmail || pending.name === pEmail.split("@")[0]) {
+          patch.name = realName;
+        }
+        await ctx.db.patch(pending._id, patch as never);
+        const now = Date.now();
+        await ctx.db.insert("activity", {
+          groupId: g._id, type: "member_joined",
+          text: `${(patch.name ?? pending.name) as string} joined the group`,
+          actorName: realName, createdAt: now,
+        });
+        return { _id: pending._id, name: (patch.name ?? pending.name) as string };
+      }
+    }
+
+    if (existing.length >= MAX_MEMBERS_PER_GROUP) throw new Error(`Groups are capped at ${MAX_MEMBERS_PER_GROUP} members.`);
+    const now = Date.now();
+    const doc: Record<string, unknown> = {
+      groupId: g._id, name: realName, createdAt: now, userId,
+    };
+    if (email) doc.email = email;
+    if (args.deviceId) doc.deviceId = args.deviceId;
+    const _id = await ctx.db.insert("members", doc as never);
+    await ctx.db.insert("activity", {
+      groupId: g._id, type: "member_joined",
+      text: `${realName} joined the group`, actorName: realName, createdAt: now,
+    });
+    return { _id, name: realName };
   },
 });
 
@@ -193,6 +254,7 @@ export const rename = mutation({
   handler: async (ctx, args) => {
     await requireAuth(ctx);
     const g = await groupByPublicId(ctx, args.publicId);
+    await requireGroupMember(ctx, g._id);
     const member = await ctx.db.get(args.memberId);
     if (!member || member.groupId !== g._id) throw new Error("Member not found in this group.");
     const name = cleanMemberName(args.name);
@@ -226,6 +288,7 @@ export const remove = mutation({
   handler: async (ctx, args) => {
     await requireAuth(ctx);
     const g = await groupByPublicId(ctx, args.publicId);
+    await requireGroupMember(ctx, g._id);
     const actor = await resolveActorName(ctx);
     const member = await ctx.db.get(args.memberId);
     if (!member || member.groupId !== g._id) throw new Error("Member not found in this group.");

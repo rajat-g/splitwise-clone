@@ -3,7 +3,7 @@ import { convexTest } from "convex-test";
 import { describe, expect, it } from "vitest";
 import { api } from "./_generated/api";
 import schema from "./schema";
-import { seedGroup, seedUser } from "./test-utils";
+import { seedGroup, seedUser } from "./testUtils";
 
 const modules = import.meta.glob("./**/*.ts");
 function fresh() {
@@ -34,7 +34,7 @@ describe("members.add", () => {
     });
     expect(res.name).toBe("Bo");
     const members = await t.query(api.members.list, { publicId: g.publicId });
-    const bo = members.find((m) => m.email === "bo@example.com");
+    const bo = members.find((m) => m.email === "bo@example.com")!;
     expect(bo).toMatchObject({ name: "Bo", email: "bo@example.com" });
     expect(bo.userId).toBeUndefined();
   });

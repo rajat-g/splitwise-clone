@@ -20,7 +20,7 @@ The no-login Splitwise: private-by-link groups (unguessable link + rotatable inv
 
 ## Operating Context
 
-Core loop: create group → share link/code → members join by name → add expenses (equal, exact, %, shares) → watch live balances → record settle-up payments → export CSV. Groups are casual and short-lived (a trip) or long-lived (a flat).
+Core loop: create group → share link/code → members join (account-linked) → add expenses (equal, exact, %, shares) → watch live balances → record settle-up payments → export CSV. Groups are casual and short-lived (a trip) or long-lived (a flat).
 
 ## Capabilities and Constraints
 

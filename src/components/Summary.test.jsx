@@ -8,7 +8,7 @@ describe("SimplifiedDebts", () => {
   it("celebrates the settled state", () => {
     render(
       <SimplifiedDebts settlements={[]} currency="$" nameOf={nameOf}
-        isAuthenticated onRecord={() => {}} onSettle={() => {}} />
+        canWrite onRecord={() => {}} onSettle={() => {}} />
     );
     expect(screen.getByText(/settled up/)).toBeInTheDocument();
   });
@@ -19,7 +19,7 @@ describe("SimplifiedDebts", () => {
     render(
       <SimplifiedDebts
         settlements={[{ from: "m1", to: "m2", amount: 20 }]}
-        currency="$" nameOf={nameOf} isAuthenticated onRecord={onRecord} onSettle={onSettle}
+        currency="$" nameOf={nameOf} canWrite onRecord={onRecord} onSettle={onSettle}
       />
     );
     expect(screen.getByText(/1 payment moves \$20\.00/)).toBeInTheDocument();
@@ -32,10 +32,10 @@ describe("SimplifiedDebts", () => {
   it("hides record buttons for guests", () => {
     render(
       <SimplifiedDebts settlements={[{ from: "m1", to: "m2", amount: 20 }]}
-        currency="$" nameOf={nameOf} isAuthenticated={false} onRecord={() => {}} onSettle={() => {}} />
+        currency="$" nameOf={nameOf} canWrite={false} onRecord={() => {}} onSettle={() => {}} />
     );
     expect(screen.queryByRole("button", { name: "Record" })).not.toBeInTheDocument();
-    expect(screen.getByText(/sign in to record/)).toBeInTheDocument();
+    expect(screen.getByText(/join the group to record/)).toBeInTheDocument();
   });
 });
 

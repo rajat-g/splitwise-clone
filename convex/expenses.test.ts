@@ -2,8 +2,9 @@
 import { convexTest } from "convex-test";
 import { describe, expect, it } from "vitest";
 import { api } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
-import { seedGroup, seedUser } from "./test-utils";
+import { seedGroup, seedUser } from "./testUtils";
 
 const modules = import.meta.glob("./**/*.ts");
 function fresh() {
@@ -25,7 +26,19 @@ async function setup() {
   return { t, authed, g, creator, ann, bo };
 }
 
-const dinner = (over = {}) => ({
+type Split = { memberId: Id<"members">; amountCents: number };
+
+const dinner = (over: {
+  paidBy: Id<"members">;
+  splits: Split[];
+  description?: string;
+  amountCents?: number;
+  date?: string;
+  category?: string;
+  splitMode?: string;
+  isSettlement?: boolean;
+  clientId?: string;
+}) => ({
   description: "Dinner",
   amountCents: 9000,
   date: "2026-09-20",

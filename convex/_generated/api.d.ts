@@ -9,12 +9,15 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as authz from "../authz.js";
 import type * as expenses from "../expenses.js";
 import type * as groups from "../groups.js";
 import type * as http from "../http.js";
 import type * as identity from "../identity.js";
 import type * as members from "../members.js";
+import type * as testUtils from "../testUtils.js";
 import type * as users from "../users.js";
+import type * as wipe from "../wipe.js";
 
 import type {
   ApiFromModules,
@@ -24,12 +27,15 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  authz: typeof authz;
   expenses: typeof expenses;
   groups: typeof groups;
   http: typeof http;
   identity: typeof identity;
   members: typeof members;
+  testUtils: typeof testUtils;
   users: typeof users;
+  wipe: typeof wipe;
 }>;
 
 /**

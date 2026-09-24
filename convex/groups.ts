@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { resolveActorName } from "./identity";
+import { requireGroupOwner } from "./authz";
 
 const PUBLIC_ID_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -91,7 +92,13 @@ export const getByPublicId = query({
   handler: async (ctx, args) => {
     const g = await ctx.db.query("groups").withIndex("by_publicId", (q) => q.eq("publicId", args.publicId)).first();
     if (!g) return null;
-    return { _id: g._id, publicId: g.publicId, name: g.name, currency: g.currency, inviteCode: g.inviteCode };
+    // ownerUserId is exposed only to signed-in viewers (the UI needs it to
+    // gate owner controls); guests never receive it.
+    const viewerId = await getAuthUserId(ctx);
+    return {
+      _id: g._id, publicId: g.publicId, name: g.name, currency: g.currency, inviteCode: g.inviteCode,
+      ...(viewerId && g.ownerUserId ? { ownerUserId: g.ownerUserId } : {}),
+    };
   },
 });
 
@@ -131,15 +138,16 @@ export const myGroups = query({
 });
 
 /**
- * Revoke a leaked/guessed code and issue a fresh one. Sign-in required —
- * guests can view the group but cannot change sharing settings.
+ * Revoke a leaked/guessed code and issue a fresh one. OWNER ONLY — any
+ * member can invite and transact, but sharing settings belong to the owner.
+ * (Ownerless legacy groups fall back to any linked member.)
  */
 export const rotateCode = mutation({
   args: { publicId: v.string() },
   handler: async (ctx, args) => {
-    await requireAuth(ctx);
     const g = await ctx.db.query("groups").withIndex("by_publicId", (q) => q.eq("publicId", args.publicId)).first();
     if (!g) throw new Error("Group not found.");
+    await requireGroupOwner(ctx, g);
     const actor = await resolveActorName(ctx);
     const inviteCode = await uniqueCode(ctx);
     await ctx.db.patch(g._id, { inviteCode });

@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { getAuthUserId } from "@convex-dev/auth/server";
 import { resolveActorName } from "./identity";
+import { requireGroupMember } from "./authz";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_CENTS = 1_000_000_00; // $1M cap per expense
@@ -25,12 +25,6 @@ function normalizeSplitMode(raw: unknown): string {
   const m = String(raw ?? "equal").trim().toLowerCase();
   if ((SPLIT_MODES as readonly string[]).includes(m)) return m;
   throw new Error("Invalid split type.");
-}
-
-async function requireAuth(ctx: any) {
-  const userId = await getAuthUserId(ctx);
-  if (!userId) throw new Error("Sign in to make changes. Guests can view only.");
-  return userId;
 }
 
 async function groupByPublicId(ctx: any, publicId: string) {
@@ -111,8 +105,10 @@ export const add = mutation({
     clientId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireAuth(ctx);
     const g = await groupByPublicId(ctx, args.publicId);
+    // Writing requires membership in THIS group — a signed-in outsider with
+    // the link can view, but cannot add.
+    await requireGroupMember(ctx, g._id);
     // Offline-sync dedup: a retried op with the same clientId returns the
     // original expense instead of inserting a duplicate.
     if (args.clientId) {
@@ -170,8 +166,8 @@ export const update = mutation({
     splitMode: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireAuth(ctx);
     const g = await groupByPublicId(ctx, args.publicId);
+    await requireGroupMember(ctx, g._id);
     const exp = await ctx.db.get(args.expenseId);
     if (!exp || String(exp.groupId) !== String(g._id)) throw new Error("Expense not found.");
     if (exp.isSettlement) throw new Error("Settlements cannot be edited — delete and re-record.");
@@ -204,8 +200,8 @@ export const update = mutation({
 export const remove = mutation({
   args: { publicId: v.string(), expenseId: v.id("expenses") },
   handler: async (ctx, args) => {
-    await requireAuth(ctx);
     const g = await groupByPublicId(ctx, args.publicId);
+    await requireGroupMember(ctx, g._id);
     const exp = await ctx.db.get(args.expenseId);
     if (!exp || String(exp.groupId) !== String(g._id)) throw new Error("Expense not found.");
     const actor = await resolveActorName(ctx);

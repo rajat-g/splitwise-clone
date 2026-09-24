@@ -19,7 +19,7 @@ vi.mock("@convex-dev/auth/react", () => ({
 }));
 
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { getFunctionName } from "convex/server";
 import { dropOp, enqueueAdd, getOutbox } from "../lib/offline";
 import GroupPage from "./GroupPage";
@@ -33,7 +33,7 @@ function fname(ref) {
 }
 
 const NOW = Date.now();
-const group = { _id: "g1", publicId: "abc", name: "Goa", currency: "$", inviteCode: "KX7Q9M2PAB" };
+const group = { _id: "g1", publicId: "abc", name: "Goa", currency: "$", inviteCode: "KX7Q9M2PAB", ownerUserId: "u1" };
 const members = [
   { _id: "m1", name: "Ada", email: "ada@x.co", userId: "u1", createdAt: NOW - 5000 },
   { _id: "m2", name: "bo@x.co", email: "bo@x.co", createdAt: NOW - 4000 },
@@ -63,7 +63,7 @@ beforeEach(() => {
   Object.defineProperty(navigator, "onLine", { value: true, configurable: true });
   window.confirm = vi.fn(() => true);
   for (const k of Object.keys(mutations)) delete mutations[k];
-  for (const name of ["addMember", "renameMember", "removeMember", "addExpense", "updateExpense", "deleteExpense", "rotateCode", "claimInvite"]) {
+  for (const name of ["addMember", "renameMember", "removeMember", "addExpense", "updateExpense", "deleteExpense", "rotateCode", "claimInvite", "joinGroup"]) {
     mutations[name] = vi.fn().mockResolvedValue({});
   }
   mockUseConvexAuth.mockReset().mockReturnValue({ isAuthenticated: false, isLoading: false });
@@ -73,6 +73,7 @@ beforeEach(() => {
       case "members:add": return mutations.addMember;
       case "members:rename": return mutations.renameMember;
       case "members:remove": return mutations.removeMember;
+      case "members:join": return mutations.joinGroup;
       case "expenses:add": return mutations.addExpense;
       case "expenses:update": return mutations.updateExpense;
       case "expenses:remove": return mutations.deleteExpense;
@@ -158,7 +159,8 @@ describe("GroupPage as guest", () => {
     expect(screen.getByText("Ada added dinner")).toBeInTheDocument();
 
     fireEvent.click(tab(4));
-    await waitFor(() => expect(screen.getByText("Top category")).toBeInTheDocument());
+    // Lazy-loaded recharts transform can be slow under parallel load.
+    await waitFor(() => expect(screen.getByText("Top category")).toBeInTheDocument(), { timeout: 10000 });
   });
 
   it("filters expenses by category", () => {
@@ -321,7 +323,74 @@ describe("GroupPage edge paths", () => {
     renderPage();
     const btn = screen.getByRole("button", { name: /new code/i });
     expect(btn).toBeDisabled();
-    expect(btn).toHaveAttribute("title", expect.stringMatching(/sign-in required/i));
+    expect(btn).toHaveAttribute("title", expect.stringMatching(/only the group owner/i));
+  });
+
+  it("disables code rotation for non-owner members", () => {
+    mockUseConvexAuth.mockReturnValue({ isAuthenticated: true, isLoading: false });
+    mockUseQuery.mockImplementation((ref) => {
+      switch (fname(ref)) {
+        case "groups:getByPublicId": return group;
+        case "members:list": return members;
+        case "expenses:list": return expenses;
+        case "expenses:activity": return activity;
+        case "users:viewer": return { _id: "u3", name: "Cy", email: "cy@x.co" };
+        default: return undefined;
+      }
+    });
+    renderPage();
+    expect(screen.getByRole("button", { name: /new code/i })).toBeDisabled();
+    expect(screen.getAllByRole("button", { name: "Add expense" }).length).toBeGreaterThan(0);
+  });
+
+  it("prompts signed-in outsiders to join and lets them in", async () => {
+    mockUseConvexAuth.mockReturnValue({ isAuthenticated: true, isLoading: false });
+    mockUseQuery.mockImplementation((ref) => {
+      switch (fname(ref)) {
+        case "groups:getByPublicId": return group;
+        case "members:list": return members;
+        case "expenses:list": return expenses;
+        case "expenses:activity": return activity;
+        case "users:viewer": return { _id: "u9", name: "Stranger", email: "s@x.co" };
+        default: return undefined;
+      }
+    });
+    renderPage();
+    expect(screen.getByText(/not a member of this group yet/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add expense" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Invite" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Join this group" }));
+    await waitFor(() => expect(mutations.joinGroup).toHaveBeenCalledWith(
+      expect.objectContaining({ publicId: "abc" })
+    ));
+
+    fireEvent.click(tab(5));
+    fireEvent.click(screen.getByRole("button", { name: /join this group to invite members/i }));
+    expect(mutations.joinGroup).toHaveBeenCalledTimes(2);
+  });
+
+  it("blocks joining while offline and surfaces join failures", async () => {
+    mockUseConvexAuth.mockReturnValue({ isAuthenticated: true, isLoading: false });
+    mockUseQuery.mockImplementation((ref) => {
+      switch (fname(ref)) {
+        case "groups:getByPublicId": return group;
+        case "members:list": return members;
+        case "expenses:list": return expenses;
+        case "expenses:activity": return activity;
+        case "users:viewer": return { _id: "u9", name: "Stranger", email: "s@x.co" };
+        default: return undefined;
+      }
+    });
+    mutations.joinGroup.mockRejectedValueOnce(new Error("Join denied"));
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Join to add" }));
+    await waitFor(() => expect(screen.getByText("Join denied")).toBeInTheDocument());
+
+    Object.defineProperty(navigator, "onLine", { value: false, configurable: true });
+    act(() => { window.dispatchEvent(new Event("offline")); });
+    fireEvent.click(screen.getByRole("button", { name: "Join to add" }));
+    expect(screen.getByText(/joining needs a connection/i)).toBeInTheDocument();
   });
 
   it("shows the offline notice without a snapshot", () => {

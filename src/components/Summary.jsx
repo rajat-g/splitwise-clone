@@ -9,14 +9,14 @@ function Money({ cents, currency, className = "" }) {
   return <span className={`tnum ${className}`}>{fmt(fromCents(cents), currency)}</span>;
 }
 
-export function SimplifiedDebts({ settlements, currency, nameOf, isAuthenticated, onRecord, onSettle }) {
+export function SimplifiedDebts({ settlements, currency, nameOf, canWrite, onRecord, onSettle }) {
   const moving = settlements.reduce((a, s) => a + (Number(s.amount) || 0), 0);
   return (
     <Card className="p-5 sm:p-6">
       <SectionTitle
         title="Simplified debts"
         sub="Who pays whom, restructured to need the fewest payments. Nobody's total changes — only the paths are optimized, recalculated on every expense or payment."
-        action={isAuthenticated && settlements.length > 0 && (
+        action={canWrite && settlements.length > 0 && (
           <Button size="sm" variant="soft" onClick={onSettle}>
             <Icon.Wallet className="h-4 w-4" /> Settle
           </Button>
@@ -42,7 +42,7 @@ export function SimplifiedDebts({ settlements, currency, nameOf, isAuthenticated
                 {nameOf(s.from)} <span className="text-slate-400 dark:text-slate-500">→</span> {nameOf(s.to)}
               </span>
               <Money cents={Math.round(s.amount * 100)} currency={currency} className="shrink-0 font-bold text-slate-900 dark:text-white" />
-              {isAuthenticated && (
+              {canWrite && (
                 <button
                   onClick={() => onRecord(s)}
                   title={`Record payment from ${nameOf(s.from)} to ${nameOf(s.to)}`}
@@ -56,9 +56,9 @@ export function SimplifiedDebts({ settlements, currency, nameOf, isAuthenticated
         </>
       )}
       <p className="mt-3 text-xs leading-relaxed text-slate-400 dark:text-slate-500">
-        {isAuthenticated
+        {canWrite
           ? "Tip: record a payment and balances update live for everyone in the group."
-          : "Tip: sign in to record a payment — balances then update live for everyone."}
+          : "Tip: join the group to record a payment — balances then update live for everyone."}
       </p>
     </Card>
   );

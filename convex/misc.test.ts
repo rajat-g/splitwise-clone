@@ -3,7 +3,7 @@ import { convexTest } from "convex-test";
 import { describe, expect, it } from "vitest";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
-import { seedGroup, seedUser } from "./test-utils";
+import { seedGroup, seedUser } from "./testUtils";
 
 const modules = import.meta.glob("./**/*.ts");
 function fresh() {

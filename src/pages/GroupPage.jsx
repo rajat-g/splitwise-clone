@@ -95,6 +95,7 @@ export default function GroupPage() {
   const renameMember = useMutation(api.members.rename);
   const removeMemberM = useMutation(api.members.remove);
   const claimInvite = useMutation(api.members.claim);
+  const joinGroupM = useMutation(api.members.join);
   const addExpense = useMutation(api.expenses.add);
   const updateExpense = useMutation(api.expenses.update);
   const deleteExpense = useMutation(api.expenses.remove);
@@ -148,6 +149,7 @@ export default function GroupPage() {
         group: {
           _id: group._id, publicId: group.publicId, name: group.name,
           currency: group.currency, inviteCode: group.inviteCode,
+          ownerUserId: group.ownerUserId,
         },
         members, expenses, activity,
       });
@@ -284,9 +286,29 @@ export default function GroupPage() {
         (m) => viewer.email && memberEmail(m) && memberEmail(m) === String(viewer.email).trim().toLowerCase()
       ) ?? null)
     : null;
+  // Write access = linked membership in THIS group. Signed-in outsiders with
+  // the link can view everything but must join before they can transact.
+  // The server re-checks membership on every mutation — this only gates UI.
+  const isMember = !!viewerMember;
+  const isOwner = !!(viewer && renderGroup.ownerUserId
+    && String(renderGroup.ownerUserId) === String(viewer._id));
   const myBalance = viewerMember ? (balances[mid(viewerMember)] || 0) : null;
   const outstanding = Object.values(balances).reduce((a, b) => a + Math.max(0, b), 0);
   const maxAbs = Math.max(1, ...Object.values(balances).map((b) => Math.abs(b)));
+
+  const handleJoin = async () => {
+    if (!requireAccount()) return;
+    if (!online) {
+      setError("You're offline — joining needs a connection.");
+      return;
+    }
+    setError("");
+    try {
+      await joinGroupM({ publicId, deviceId: getDeviceId() });
+    } catch (e) {
+      setError(e.message);
+    }
+  };
 
   const handleSaveExpense = async (data) => {
     if (!requireAccount()) return;
@@ -497,6 +519,17 @@ export default function GroupPage() {
           </Button>
         </div>
       )}
+      {isAuthenticated && !isMember && (
+        <div className="flex flex-col gap-2.5 rounded-[20px] border border-amber-500/25 bg-amber-50 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-5 dark:border-amber-400/20 dark:bg-amber-400/[0.06]">
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            <span className="font-bold text-slate-900 dark:text-white">You&apos;re not a member of this group yet.</span>{" "}
+            Join{viewer?.name ? ` as ${viewer.name}` : ""} to add expenses, invite friends and settle up.
+          </p>
+          <Button size="sm" onClick={handleJoin} className="shrink-0">
+            Join this group
+          </Button>
+        </div>
+      )}
       <OutboxBar
         items={groupOps} online={online} syncing={syncing}
         onSync={() => runSync({ includeFailed: true })}
@@ -524,7 +557,7 @@ export default function GroupPage() {
               </div>
             </div>
             <div className="hidden gap-2 md:flex">
-              {isAuthenticated ? (
+              {isMember ? (
                 <>
                   <Button variant="secondary" onClick={() => openSettle()}>
                     <Icon.Wallet className="h-4 w-4" /> Settle up
@@ -533,6 +566,10 @@ export default function GroupPage() {
                     <Icon.Plus className="h-4 w-4" /> Add expense
                   </Button>
                 </>
+              ) : isAuthenticated ? (
+                <Button variant="secondary" onClick={handleJoin}>
+                  Join to add
+                </Button>
               ) : (
                 <Button variant="secondary" onClick={() => setAuthOpen(true)}>
                   Sign in to add
@@ -567,8 +604,8 @@ export default function GroupPage() {
                   {formatInviteCode(renderGroup.inviteCode)}
                 </span>
               )}
-              <Button variant="ghost" size="sm" title="Revoke this code and issue a new one (sign-in required)"
-                disabled={!isAuthenticated}
+              <Button variant="ghost" size="sm" title={isOwner ? "Revoke this code and issue a new one" : "Only the group owner can rotate the invite code"}
+                disabled={!isOwner}
                 onClick={handleRotateCode}>
                 <Icon.Refresh className="h-4 w-4" />
                 <span className="lg:hidden">New code</span>
@@ -607,8 +644,8 @@ export default function GroupPage() {
             <EmptyState
               icon={<Icon.Receipt className="h-6 w-6" />}
               title="No expenses yet"
-              body={isAuthenticated ? "Add the first one — dinner, taxi, groceries. Everyone in the group will see it instantly." : "No expenses yet. Sign in to add the first one — dinner, taxi, groceries."}
-              action={isAuthenticated
+              body={isMember ? "Add the first one — dinner, taxi, groceries. Everyone in the group will see it instantly." : "No expenses yet. Members can add the first one — dinner, taxi, groceries."}
+              action={isMember
                 ? <Button onClick={() => { setEditing(null); setShowExpense(true); }}><Icon.Plus className="h-4 w-4" /> Add expense</Button>
                 : <Button variant="secondary" onClick={() => setAuthOpen(true)}>Sign in to add</Button>}
             />
@@ -635,7 +672,7 @@ export default function GroupPage() {
                   <p className="mx-auto mt-1 max-w-xs text-sm leading-relaxed text-slate-500 dark:text-slate-400">
                     Nothing in this category so far — add one and it will show up here.
                   </p>
-                  {isAuthenticated && (
+                  {isMember && (
                     <Button onClick={() => { setEditing(null); setShowExpense(true); }} className="mt-5">
                       <Icon.Plus className="h-4 w-4" /> Add expense
                     </Button>
@@ -675,14 +712,14 @@ export default function GroupPage() {
                   <Money value={fromCents(e.amountCents)} currency={currency}
                     className="shrink-0 text-[15px] font-bold text-slate-900 dark:text-white" />
                   <div className="flex shrink-0 items-center sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
-                    {isAuthenticated && !e.isSettlement && (
+                    {isMember && !e.isSettlement && (
                       <button aria-label={`Edit ${e.description}`} title="Edit"
                         onClick={() => { setEditing(e); setShowExpense(true); }}
                         className="grid h-10 w-10 place-items-center rounded-xl text-slate-400 transition-colors hover:bg-slate-900/[0.06] hover:text-slate-700 cursor-pointer dark:hover:bg-white/10 dark:hover:text-slate-200">
                         <Icon.Pencil className="h-[18px] w-[18px]" />
                       </button>
                     )}
-                    {isAuthenticated && (
+                    {isMember && (
                     <button aria-label={`Delete ${e.description}`} title="Delete"
                       onClick={() => handleDeleteExpense(e)}
                       className="grid h-10 w-10 place-items-center rounded-xl text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 cursor-pointer dark:hover:bg-red-500/10 dark:hover:text-red-400">
@@ -738,7 +775,7 @@ export default function GroupPage() {
       {tab === "debts" && (
         <SimplifiedDebts
           settlements={settlements} currency={currency} nameOf={nameOf}
-          isAuthenticated={isAuthenticated}
+          canWrite={isMember}
           onRecord={(s) => openSettle({ from: s.from, to: s.to, amount: s.amount })}
           onSettle={() => openSettle()}
         />
@@ -759,8 +796,8 @@ export default function GroupPage() {
       {tab === "members" && (
         <div className="grid items-start gap-4 sm:gap-5 lg:grid-cols-[1.2fr_1fr]">
           <Card className="p-5 sm:p-6">
-            <SectionTitle title={`Members · ${renderMembers.length}`} sub={isAuthenticated ? "Invite by email — shows their name once they sign up." : "Sign in to add or remove members."} />
-            {isAuthenticated ? (
+            <SectionTitle title={`Members · ${renderMembers.length}`} sub={isMember ? "Invite by email — shows their name once they sign up." : "Members can invite, rename and remove. Join the group to manage members."} />
+            {isMember ? (
             <form className="mt-4" onSubmit={handleAddMember} noValidate>
               <div className="grid gap-2.5 min-[520px]:grid-cols-[1.4fr_1fr_auto]">
                 <TextInput type="email" placeholder="Email — e.g. priya@example.com" value={newMemberEmail}
@@ -781,6 +818,10 @@ export default function GroupPage() {
                 ? <p role="alert" className="mt-1.5 text-xs font-medium text-red-600 dark:text-red-400">{memberError}</p>
                 : <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">{renderMembers.length} of {MAX_MEMBERS_PER_GROUP} seats used · name appears after they sign up</p>}
             </form>
+            ) : isAuthenticated ? (
+              <Button variant="secondary" onClick={handleJoin} className="mt-4 w-full min-[420px]:w-auto">
+                Join this group to invite members
+              </Button>
             ) : (
               <Button variant="secondary" onClick={() => setAuthOpen(true)} className="mt-4 w-full min-[420px]:w-auto">
                 Sign in to add members
@@ -834,7 +875,7 @@ export default function GroupPage() {
                               : <span> · added {timeAgo(m.createdAt)}</span>}
                           </span>
                         </span>
-                        {isAuthenticated && (
+                        {isMember && (
                           <span className="flex shrink-0 items-center gap-1">
                             <button aria-label={`Rename ${displayOf(m)}`} title={memberEmail(m) ? `Rename display name (email stays ${memberEmail(m)})` : "Rename"}
                               onClick={() => startRename(m)}
@@ -869,7 +910,7 @@ export default function GroupPage() {
               })}
             </ul>
             <p className="mt-3 rounded-xl bg-slate-50 px-3.5 py-2.5 text-xs leading-relaxed text-slate-500 dark:bg-white/[0.03] dark:text-slate-400">
-              Invite by email — the row shows the email until they sign up, then swaps to their name automatically. Add a temp name to keep the list readable meanwhile. Anyone with the link can view; only signed-in members can invite or remove.
+              Invite by email — the row shows the email until they sign up, then swaps to their name automatically. Add a temp name to keep the list readable meanwhile. Anyone with the link can view; only members can invite, rename or remove.
             </p>
           </Card>
           <Card className="p-5 sm:p-6">
@@ -916,7 +957,7 @@ export default function GroupPage() {
 
       {/* Thumb-reach actions on phones + small tablets */}
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200/70 bg-white/90 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl md:hidden dark:border-white/10 dark:bg-[#070c13]/85">
-        {isAuthenticated ? (
+        {isMember ? (
         <div className="mx-auto grid max-w-6xl grid-cols-2 gap-2.5">
           <Button variant="secondary" onClick={() => openSettle()} className="!min-h-[3rem]">
             <Icon.Wallet className="h-4 w-4" /> Settle up
@@ -934,7 +975,7 @@ export default function GroupPage() {
         )}
       </div>
 
-      {showExpense && isAuthenticated && (
+      {showExpense && isMember && (
         <ExpenseModal
           members={renderMembers} currency={currency}
           initial={editing ? expenseToForm(editing) : null}
@@ -943,7 +984,7 @@ export default function GroupPage() {
           onSave={handleSaveExpense}
         />
       )}
-      {showSettle && isAuthenticated && (
+      {showSettle && isMember && (
         <SettleModal members={renderMembers} balances={balances} currency={currency} saving={saving}
           initial={settlePrefill} onClose={closeSettle} onSave={handleSettle} />
       )}

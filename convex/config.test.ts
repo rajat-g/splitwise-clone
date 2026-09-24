@@ -6,7 +6,7 @@ import authConfig from "./auth.config";
 import { auth } from "./auth";
 import http from "./http";
 import schema from "./schema";
-import { seedUser } from "./test-utils";
+import { seedUser } from "./testUtils";
 
 const modules = import.meta.glob("./**/*.ts");
 

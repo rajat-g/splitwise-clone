@@ -3,7 +3,7 @@ import { convexTest } from "convex-test";
 import { describe, expect, it } from "vitest";
 import { api } from "./_generated/api";
 import schema from "./schema";
-import { seedGroup, seedUser } from "./test-utils";
+import { seedGroup, seedUser } from "./testUtils";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -115,9 +115,11 @@ describe("groups.rotateCode", () => {
 
   it("rejects guests and unknown groups", async () => {
     const t = fresh();
-    await expect(t.mutation(api.groups.rotateCode, { publicId: "x" })).rejects.toThrow(/sign in/i);
+    await expect(t.mutation(api.groups.rotateCode, { publicId: "x" })).rejects.toThrow(/not found/i);
     const { authed } = await seedUser(t);
     await expect(authed.mutation(api.groups.rotateCode, { publicId: "x" })).rejects.toThrow(/not found/i);
+    const g = await seedGroup(authed);
+    await expect(t.mutation(api.groups.rotateCode, { publicId: g.publicId })).rejects.toThrow(/sign in/i);
   });
 
   it("fails code generation under total collision", async () => {
