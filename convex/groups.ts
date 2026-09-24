@@ -5,15 +5,32 @@ import { resolveActorName } from "./identity";
 import { requireGroupOwner } from "./authz";
 
 const PUBLIC_ID_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
+const PUBLIC_ID_LEN = 21;
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 // 10 chars x 31 symbols ≈ 8.2e14 combos (~49 bits) — not brute-forceable.
 const CODE_LEN = 10;
 export const ALLOWED_CURRENCIES = ["$", "€", "£", "₹", "¥", "₩", "A$", "C$", "R$", "₺", "₽", "₴", "₦", "₱", "฿", "kr", "CHF", "zł"];
 
-function rand(alphabet: string, len: number) {
-  let s = "";
-  for (let i = 0; i < len; i++) s += alphabet[Math.floor(Math.random() * alphabet.length)];
-  return s;
+/**
+ * CSPRNG-backed random string with rejection sampling (no modulo bias).
+ * Feeds both group secrets — the 21-char publicId (126 bits, the privacy
+ * boundary) and the 10-char invite code. Uses Web Crypto, which the Convex
+ * isolate provides; Math.random() must never feed these (predictable).
+ * (nanoid was considered — its default entry needs Node's Buffer, which
+ * doesn't exist in the isolate — so this inlines its exact algorithm.)
+ */
+function secureRandomString(alphabet: string, len: number): string {
+  const out: string[] = [];
+  const cutoff = 256 - (256 % alphabet.length);
+  const buf = new Uint8Array(64);
+  while (out.length < len) {
+    crypto.getRandomValues(buf);
+    for (let i = 0; i < buf.length && out.length < len; i++) {
+      const byte = buf[i];
+      if (byte < cutoff) out.push(alphabet[byte % alphabet.length]);
+    }
+  }
+  return out.join("");
 }
 
 /** Uppercase, strip spaces/dashes so "KX7Q-9M2P-AB" and "kx7q9m2pab" both work. */
@@ -23,7 +40,7 @@ function normalizeCode(raw: string) {
 
 async function uniqueCode(ctx: any) {
   for (let i = 0; i < 10; i++) {
-    const cand = rand(CODE_ALPHABET, CODE_LEN);
+    const cand = secureRandomString(CODE_ALPHABET, CODE_LEN);
     const exists = await ctx.db.query("groups").withIndex("by_inviteCode", (q: any) => q.eq("inviteCode", cand)).first();
     if (!exists) return cand;
   }
@@ -58,7 +75,7 @@ export const create = mutation({
     // unique secrets (retry on the astronomically unlikely collision)
     let publicId = "";
     for (let i = 0; i < 5; i++) {
-      const cand = rand(PUBLIC_ID_ALPHABET, 21);
+      const cand = secureRandomString(PUBLIC_ID_ALPHABET, PUBLIC_ID_LEN);
       const exists = await ctx.db.query("groups").withIndex("by_publicId", (q) => q.eq("publicId", cand)).first();
       if (!exists) { publicId = cand; break; }
     }

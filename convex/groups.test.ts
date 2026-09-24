@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { api } from "./_generated/api";
 import schema from "./schema";
 import { seedGroup, seedUser } from "./testUtils";
@@ -133,12 +133,27 @@ describe("groups.rotateCode", () => {
         .first();
       await ctx.db.patch(row!._id, { inviteCode: "AAAAAAAAAA" });
     });
-    const rand = Math.random;
-    Math.random = () => 0;
+    // Pin the CSPRNG to zeros: every candidate becomes alphabet[0],
+    // so publicId is fresh but all 10 invite-code attempts collide.
+    const spy = vi.spyOn(globalThis.crypto, "getRandomValues").mockImplementation((buf) => {
+      (buf as Uint8Array).fill(0);
+      return buf;
+    });
     try {
       await expect(seedGroup(authed, { name: "Two" })).rejects.toThrow(/invite code/i);
     } finally {
-      Math.random = rand;
+      spy.mockRestore();
     }
+  });
+
+  it("generates unique, well-formed secrets", async () => {
+    const t = fresh();
+    const { authed } = await seedUser(t);
+    const a = await seedGroup(authed, { name: "A" });
+    const b = await seedGroup(authed, { name: "B" });
+    expect(a.publicId).toHaveLength(21);
+    expect(a.publicId).not.toBe(b.publicId);
+    expect(a.inviteCode).toMatch(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{10}$/);
+    expect(a.inviteCode).not.toBe(b.inviteCode);
   });
 });
